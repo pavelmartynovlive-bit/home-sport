@@ -1,4 +1,4 @@
-import { workout } from './program'
+import { isMobilityExercise, workout } from './program'
 import type { StoredState, WorkoutSession } from './types'
 export const STORAGE_KEY = 'home-sport:v1'
 export const emptyState = (): StoredState => ({ version: 1, active: null, history: [] })
@@ -33,7 +33,15 @@ export function createSession(history: WorkoutSession[], now = new Date()): Work
     }) }
   }) }
 }
+// Keep the existing per-exercise storage format so saved sessions remain compatible.
+export function mobilityCompleted(session: WorkoutSession): boolean {
+  return session.exercises.filter((_, i) => isMobilityExercise(workout.exercises[i])).every(e => e.sets.every(s => s.completed))
+}
+export function setMobilityCompleted(session: WorkoutSession, completed: boolean): WorkoutSession {
+  return { ...session, exercises: session.exercises.map((e, i) => isMobilityExercise(workout.exercises[i]) ? { ...e, sets: e.sets.map(s => ({ ...s, completed })) } : e) }
+}
 export function stats(session: WorkoutSession) {
-  return { exercises: session.exercises.filter(e => e.sets.every(s => s.completed)).length, sets: session.exercises.reduce((n, e) => n + e.sets.filter(s => s.completed).length, 0), totalSets: session.exercises.reduce((n, e) => n + e.sets.length, 0) }
+  const tracked = session.exercises.filter((_, i) => !isMobilityExercise(workout.exercises[i]))
+  return { exercises: session.exercises.filter(e => e.sets.every(s => s.completed)).length, sets: tracked.reduce((n, e) => n + e.sets.filter(s => s.completed).length, 0), totalSets: tracked.reduce((n, e) => n + e.sets.length, 0) }
 }
 export function minutes(session: WorkoutSession) { return Math.max(1, Math.round((Date.parse(session.finishedAt ?? new Date().toISOString()) - Date.parse(session.startedAt)) / 60000)) }

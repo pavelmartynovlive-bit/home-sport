@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { createSession, emptyState, loadState, saveState, stats, STORAGE_KEY } from './store'
+import { createSession, emptyState, loadState, saveState, stats, mobilityCompleted, setMobilityCompleted, STORAGE_KEY } from './store'
 import { workout } from './program'
 let values: Map<string, string>
 beforeEach(() => {
@@ -14,7 +14,26 @@ describe('personal workout storage', () => {
     expect(s.exercises[15].sets[0].weight).toBe(8)
     expect(s.exercises[0].sets[0].weight).toBeUndefined()
     expect(workout.exercises[9].unit).toBe('seconds')
-    expect(stats(s)).toEqual({ exercises: 0, sets: 0, totalSets: 37 })
+    expect(stats(s)).toEqual({ exercises: 0, sets: 0, totalSets: 27 })
+  })
+  it('toggles the entire mobility block without changing other exercises or losing legacy values', () => {
+    const original = createSession([])
+    original.exercises[0].sets[0] = { reps: 9, completed: true }
+    original.exercises[15].sets[0] = { reps: 12, weight: 9.5, completed: true }
+    expect(mobilityCompleted(original)).toBe(false)
+    const checked = setMobilityCompleted(original, true)
+    expect(mobilityCompleted(checked)).toBe(true)
+    expect(stats(checked)).toEqual({ exercises: 10, sets: 1, totalSets: 27 })
+    expect(checked.exercises[0].sets[0].reps).toBe(9)
+    expect(checked.exercises[15]).toEqual(original.exercises[15])
+    const unchecked = setMobilityCompleted(checked, false)
+    expect(mobilityCompleted(unchecked)).toBe(false)
+    expect(unchecked.exercises.slice(0, 10).every(e => e.sets.every(s => !s.completed))).toBe(true)
+    expect(stats(unchecked).exercises).toBe(0)
+    const state = { ...emptyState(), active: checked, history: [original] }
+    expect(saveState(state)).toBe(true)
+    expect(loadState().state).toEqual(state)
+    expect(mobilityCompleted(createSession([checked]))).toBe(false)
   })
   it('reuses actual completed values per set, falling back past partial sessions', () => {
     const older = createSession([])
