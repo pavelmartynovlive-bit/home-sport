@@ -19,6 +19,8 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Verify backup API
+        run: python3 -m unittest server.test_server -v
       - name: Build for repository URL
         run: npm run build
         env:

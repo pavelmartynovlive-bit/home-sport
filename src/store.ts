@@ -2,14 +2,14 @@ import { isBlockExercise, workout } from './program'
 import type { StoredState, WorkoutSession } from './types'
 export const STORAGE_KEY = 'home-sport:v1'
 export const emptyState = (): StoredState => ({ version: 1, active: null, history: [] })
-function isSession(value: unknown): value is WorkoutSession {
+export function isSession(value: unknown): value is WorkoutSession {
   if (!value || typeof value !== 'object') return false
   const s = value as WorkoutSession
-  return typeof s.id === 'string' && s.workoutId === workout.id && typeof s.startedAt === 'string' && Number.isFinite(Date.parse(s.startedAt)) &&
+  return typeof s.id === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(s.id) && s.workoutId === workout.id && typeof s.startedAt === 'string' && Number.isFinite(Date.parse(s.startedAt)) &&
     (s.finishedAt === undefined || (typeof s.finishedAt === 'string' && Number.isFinite(Date.parse(s.finishedAt)))) &&
     Array.isArray(s.exercises) && s.exercises.length === workout.exercises.length &&
-    s.exercises.every((e, i) => e.exerciseId === workout.exercises[i].id && Array.isArray(e.sets) && e.sets.length === workout.exercises[i].sets.length &&
-      e.sets.every(set => Number.isFinite(set.reps) && set.reps >= 0 && typeof set.completed === 'boolean' &&
+    s.exercises.every((e, i) => !!e && typeof e === 'object' && e.exerciseId === workout.exercises[i].id && Array.isArray(e.sets) && e.sets.length === workout.exercises[i].sets.length &&
+      e.sets.every(set => !!set && typeof set === 'object' && Number.isFinite(set.reps) && set.reps >= 0 && typeof set.completed === 'boolean' &&
         (workout.exercises[i].defaultWeight === undefined ? set.weight === undefined : Number.isFinite(set.weight) && set.weight! >= 0)))
 }
 export function loadState(): { state: StoredState; error: string | null } {

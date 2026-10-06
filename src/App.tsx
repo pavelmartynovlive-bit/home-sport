@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import CopyResults from './CopyResults'
+import BackupPanel from './BackupPanel'
+import { useBackup } from './useBackup'
 import { categories, isBlockExercise, workout } from './program'
 import { createSession, loadState, minutes, blockCompleted, saveState, setBlockCompleted, stats } from './store'
 import type { CompletedSet, StoredState, WorkoutExercise, WorkoutSession } from './types'
 
-type Screen = 'home' | 'workout' | 'focus' | 'summary' | 'history' | 'detail'
+type Screen = 'home' | 'workout' | 'focus' | 'summary' | 'history' | 'detail' | 'backup'
 type IconName = 'arrow' | 'back' | 'check' | 'play' | 'clock' | 'history' | 'close' | 'home' | 'stretch'
 function Icon({ name, size = 20 }: { name: IconName; size?: number }) {
   const paths: Record<IconName, ReactNode> = {
@@ -66,6 +68,7 @@ function Technique({ exercise, onClose }: { exercise: WorkoutExercise; onClose: 
 export default function App() {
   const [initial] = useState(loadState)
   const [state, setState] = useState<StoredState>(initial.state)
+  const backup = useBackup(state, setState)
   const [storageError, setStorageError] = useState(initial.error)
   const [screen, setScreen] = useState<Screen>('home')
   const [focus, setFocus] = useState(0)
@@ -130,6 +133,8 @@ export default function App() {
 
         <button className="history-link" onClick={() => go('history')}><span><Icon name="history"/>История тренировок</span><Icon name="arrow"/></button>
 
+        <button className="backup-link" onClick={() => go('backup')}>Резервная копия<span>{backup.config ? backup.pending ? 'Ожидает отправки' : 'Подключена' : 'Настроить'}</span></button>
+        {backup.config && <p className="home-backup-status" role="status">Сохранено на телефоне · {backup.status}</p>}
         <p className="home-footer">Без сравнения. Без рекордов. Для себя.</p>
       </>}
       {screen === 'workout' && active && progress && <>
@@ -162,7 +167,8 @@ export default function App() {
       {screen === 'summary' && active && progress && <>
         <div className="screen-toolbar"><button className="back-link" onClick={() => go('workout')}><Icon name="back"/>Вернуться к упражнениям</button><CopyResults session={active}/></div><div className="summary-hero"><span className="success-orbit"><Icon name="check" size={44}/></span><span className="eyebrow">ВРЕМЯ ДЛЯ СЕБЯ — ПРОВЕДЕНО</span><h1>{progress.exercises === total ? 'Тренировка\nзавершена 💪' : 'Отличная\nработа 💪'}</h1><p>{progress.exercises === total ? 'Все упражнения позади. Можно выдохнуть.' : 'Сохрани то, что удалось сделать сегодня.'}</p></div><div className="summary-stats"><div><strong>{minutes(active)}</strong><span>минут</span></div><div><strong>{progress.exercises}<small>/{total}</small></strong><span>упражнений</span></div><div><strong>{progress.sets}<small>/{progress.totalSets}</small></strong><span>подходов</span></div></div>{progress.exercises < total && <p className="side-note">Невыполненные подходы сохранятся как пропущенные.</p>}<button className="button primary" onClick={finish}>Завершить и сохранить<Icon name="check"/></button><p className="save-note">Результаты появятся в истории и помогут в следующий раз.</p>
       </>}
-      {screen === 'history' && <><button className="back-link" onClick={() => go('home')}><Icon name="back"/>На главную</button><div className="page-heading"><span className="eyebrow">ТВОЙ ПУТЬ</span><h1>История<br/>тренировок.</h1></div>{state.history.length ? <div className="history-list">{state.history.map(session => <button className="history-card" key={session.id} onClick={() => { setSelected(session); go('detail') }}><span className="history-icon"><Icon name="check"/></span><div><h2>{date(session.startedAt)}</h2><p>Домашняя тренировка</p><small>{minutes(session)} мин · {stats(session).exercises} / {total} упражнений</small></div><Icon name="arrow"/></button>)}</div> : <div className="empty-history"><Icon name="history" size={48}/><h2>Начало ещё впереди</h2><p>После завершения тренировки<br/>её результаты будут здесь.</p><button className="button primary" onClick={begin}>{active ? 'Продолжить тренировку' : 'Начать тренировку'}<Icon name="arrow"/></button></div>}</>}
+      {screen === 'history' && <><button className="back-link" onClick={() => go('home')}><Icon name="back"/>На главную</button><div className="page-heading"><span className="eyebrow">ТВОЙ ПУТЬ</span><h1>История<br/>тренировок.</h1></div><button className="backup-link" onClick={() => go('backup')}>Резервная копия<span>{backup.config ? 'Подключена' : 'Настроить'}</span></button>{state.history.length ? <div className="history-list">{state.history.map(session => <button className="history-card" key={session.id} onClick={() => { setSelected(session); go('detail') }}><span className="history-icon"><Icon name="check"/></span><div><h2>{date(session.startedAt)}</h2><p>Домашняя тренировка</p><small>{minutes(session)} мин · {stats(session).exercises} / {total} упражнений</small></div><Icon name="arrow"/></button>)}</div> : <div className="empty-history"><Icon name="history" size={48}/><h2>Начало ещё впереди</h2><p>После завершения тренировки<br/>её результаты будут здесь.</p><button className="button primary" onClick={begin}>{active ? 'Продолжить тренировку' : 'Начать тренировку'}<Icon name="arrow"/></button></div>}</>}
+      {screen === 'backup' && <><button className="back-link" onClick={() => go('home')}><Icon name="back"/>На главную</button><BackupPanel backup={backup}/></>}
       {screen === 'detail' && selected && <><div className="screen-toolbar"><button className="back-link" onClick={() => go('history')}><Icon name="back"/>История тренировок</button><CopyResults session={selected}/></div><div className="page-heading"><span className="eyebrow">{date(selected.startedAt)}</span><h1>Домашняя<br/>тренировка.</h1><p>{minutes(selected)} мин · {stats(selected).exercises} / {total} упражнений · {stats(selected).sets} подходов</p></div><section className="results">{results(selected)}</section></>}
     </main>
     {technique && <Technique key={technique.id} exercise={technique} onClose={() => setTechnique(null)}/>}

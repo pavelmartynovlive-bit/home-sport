@@ -1,0 +1,24 @@
+[Unit]
+Description=Home Sport personal backup API
+After=network.target
+
+[Service]
+Type=simple
+User=home-sport
+Group=home-sport
+WorkingDirectory=/opt/home-sport/server
+EnvironmentFile=/etc/home-sport.env
+ExecStart=/usr/bin/python3 /opt/home-sport/server/server.py
+Restart=on-failure
+RestartSec=5
+StateDirectory=home-sport
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/home-sport
+
+[Install]
+WantedBy=multi-user.target
