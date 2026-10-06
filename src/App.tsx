@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import CopyResults from './CopyResults'
 import { categories, isBlockExercise, workout } from './program'
 import { createSession, loadState, minutes, blockCompleted, saveState, setBlockCompleted, stats } from './store'
 import type { CompletedSet, StoredState, WorkoutExercise, WorkoutSession } from './types'
@@ -101,7 +102,6 @@ export default function App() {
   }
   const active = state.active
   const progress = active ? stats(active) : null
-  const last = state.history[0]
   const current = workout.exercises[focus]
   const elapsed = active ? Math.max(0, Math.floor((now - Date.parse(active.startedAt)) / 1000)) : 0
   const clock = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, '0')}`
@@ -127,9 +127,9 @@ export default function App() {
       {screen === 'home' && <>
         <div className="home-intro"><span className="eyebrow">ПРОСТО ВРЕМЯ ДЛЯ СЕБЯ</span><h1>Домашняя<br/>тренировка<span className="title-dot">.</span></h1><p>Знакомые упражнения.<br/>Всё, что нужно — начать.</p></div>
         <section className="start-card"><div className="start-top"><span className="pill">ТВОЯ ПРОГРАММА</span><Icon name="stretch" size={35}/></div><h2>{active ? 'Продолжим?' : 'В своём темпе'}</h2><p>{active ? `${stats(active).exercises} из ${total} упражнений выполнено` : `${total} упражнений · 5 блоков · без спешки`}</p><button className="button primary" onClick={begin}>{active ? 'Продолжить тренировку' : 'Начать тренировку'}<Icon name="arrow"/></button><span className="start-note">{active ? 'Твои подходы и значения сохранены' : 'Результаты сохраняются на этом устройстве'}</span></section>
-        <section className="last-session"><div className="section-heading"><h2>Последняя тренировка</h2><Icon name="clock"/></div>{last ? <><p className="last-date">{date(last.startedAt)}</p><div className="last-stats"><div><strong>{minutes(last)}<small> мин</small></strong><span>длительность</span></div><div><strong>{stats(last).exercises}<small> / {total}</small></strong><span>упражнений</span></div></div></> : <div className="empty-last"><span className="empty-icon"><Icon name="clock" size={24}/></span><p>Здесь появится твоя первая тренировка.<small>Начни, когда будешь готов.</small></p></div>}</section>
+
         <button className="history-link" onClick={() => go('history')}><span><Icon name="history"/>История тренировок</span><Icon name="arrow"/></button>
-        <section className="program-overview"><span className="eyebrow">ОДНА ТРЕНИРОВКА. ВСЁ ТЕЛО.</span>{categories.map((category, i) => <div className="program-row" key={category}><span className="block-number">0{i + 1}</span><span>{category}</span><small>{workout.exercises.filter(e => e.category === category).length} упр.</small></div>)}</section>
+
         <p className="home-footer">Без сравнения. Без рекордов. Для себя.</p>
       </>}
       {screen === 'workout' && active && progress && <>
@@ -160,10 +160,10 @@ export default function App() {
         }}>{nextFocus === undefined ? 'К растяжке' : 'Следующее упражнение'}<Icon name="arrow"/></button>{previousFocus !== undefined && <button className="text-button" onClick={() => { setFocus(previousFocus); window.scrollTo({ top: 0 }) }}>← Предыдущее упражнение</button>}</div>
       </>}
       {screen === 'summary' && active && progress && <>
-        <button className="back-link" onClick={() => go('workout')}><Icon name="back"/>Вернуться к упражнениям</button><div className="summary-hero"><span className="success-orbit"><Icon name="check" size={44}/></span><span className="eyebrow">ВРЕМЯ ДЛЯ СЕБЯ — ПРОВЕДЕНО</span><h1>{progress.exercises === total ? 'Тренировка\nзавершена 💪' : 'Отличная\nработа 💪'}</h1><p>{progress.exercises === total ? 'Все упражнения позади. Можно выдохнуть.' : 'Сохрани то, что удалось сделать сегодня.'}</p></div><div className="summary-stats"><div><strong>{minutes(active)}</strong><span>минут</span></div><div><strong>{progress.exercises}<small>/{total}</small></strong><span>упражнений</span></div><div><strong>{progress.sets}<small>/{progress.totalSets}</small></strong><span>подходов</span></div></div>{progress.exercises < total && <p className="side-note">Невыполненные подходы сохранятся как пропущенные.</p>}<button className="button primary" onClick={finish}>Завершить и сохранить<Icon name="check"/></button><p className="save-note">Результаты появятся в истории и помогут в следующий раз.</p>
+        <div className="screen-toolbar"><button className="back-link" onClick={() => go('workout')}><Icon name="back"/>Вернуться к упражнениям</button><CopyResults session={active}/></div><div className="summary-hero"><span className="success-orbit"><Icon name="check" size={44}/></span><span className="eyebrow">ВРЕМЯ ДЛЯ СЕБЯ — ПРОВЕДЕНО</span><h1>{progress.exercises === total ? 'Тренировка\nзавершена 💪' : 'Отличная\nработа 💪'}</h1><p>{progress.exercises === total ? 'Все упражнения позади. Можно выдохнуть.' : 'Сохрани то, что удалось сделать сегодня.'}</p></div><div className="summary-stats"><div><strong>{minutes(active)}</strong><span>минут</span></div><div><strong>{progress.exercises}<small>/{total}</small></strong><span>упражнений</span></div><div><strong>{progress.sets}<small>/{progress.totalSets}</small></strong><span>подходов</span></div></div>{progress.exercises < total && <p className="side-note">Невыполненные подходы сохранятся как пропущенные.</p>}<button className="button primary" onClick={finish}>Завершить и сохранить<Icon name="check"/></button><p className="save-note">Результаты появятся в истории и помогут в следующий раз.</p>
       </>}
       {screen === 'history' && <><button className="back-link" onClick={() => go('home')}><Icon name="back"/>На главную</button><div className="page-heading"><span className="eyebrow">ТВОЙ ПУТЬ</span><h1>История<br/>тренировок.</h1></div>{state.history.length ? <div className="history-list">{state.history.map(session => <button className="history-card" key={session.id} onClick={() => { setSelected(session); go('detail') }}><span className="history-icon"><Icon name="check"/></span><div><h2>{date(session.startedAt)}</h2><p>Домашняя тренировка</p><small>{minutes(session)} мин · {stats(session).exercises} / {total} упражнений</small></div><Icon name="arrow"/></button>)}</div> : <div className="empty-history"><Icon name="history" size={48}/><h2>Начало ещё впереди</h2><p>После завершения тренировки<br/>её результаты будут здесь.</p><button className="button primary" onClick={begin}>{active ? 'Продолжить тренировку' : 'Начать тренировку'}<Icon name="arrow"/></button></div>}</>}
-      {screen === 'detail' && selected && <><button className="back-link" onClick={() => go('history')}><Icon name="back"/>История тренировок</button><div className="page-heading"><span className="eyebrow">{date(selected.startedAt)}</span><h1>Домашняя<br/>тренировка.</h1><p>{minutes(selected)} мин · {stats(selected).exercises} / {total} упражнений · {stats(selected).sets} подходов</p></div><section className="results">{results(selected)}</section></>}
+      {screen === 'detail' && selected && <><div className="screen-toolbar"><button className="back-link" onClick={() => go('history')}><Icon name="back"/>История тренировок</button><CopyResults session={selected}/></div><div className="page-heading"><span className="eyebrow">{date(selected.startedAt)}</span><h1>Домашняя<br/>тренировка.</h1><p>{minutes(selected)} мин · {stats(selected).exercises} / {total} упражнений · {stats(selected).sets} подходов</p></div><section className="results">{results(selected)}</section></>}
     </main>
     {technique && <Technique key={technique.id} exercise={technique} onClose={() => setTechnique(null)}/>}
   </div>
