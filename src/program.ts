@@ -4,6 +4,7 @@ function exercise(id: string, title: string, category: number, plan: string, rep
   return { id, title, category: categories[category], type: category === 4 ? 'stretch' : category === 2 || category === 3 ? 'strength' : 'mobility', plan, unit: category === 4 ? 'seconds' : 'reps', sets: reps.map(reps => ({ reps })), tips, techniqueMedia: `${import.meta.env.BASE_URL}exercises/${id}.gif`, ...options }
 }
 export const isMobilityExercise = (exercise: WorkoutExercise) => exercise.category === categories[0]
+export const isBlockExercise = (exercise: WorkoutExercise) => isMobilityExercise(exercise) || exercise.category === categories[4]
 const dumbbells = { defaultWeight: 8, weightNote: 'кг каждая' }
 export const workout: Workout = { id: 'home', title: 'Домашняя тренировка', exercises: [
   exercise('cat-cow', 'Кошка-собака', 0, '8–10 повторений', [10], ['Ладони под плечами, колени под тазом.', 'На вдохе мягко раскрой грудь, на выдохе округли спину.', 'Двигайся плавно, без запрокидывания головы.']),

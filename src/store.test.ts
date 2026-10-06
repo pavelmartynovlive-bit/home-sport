@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { createSession, emptyState, loadState, saveState, stats, mobilityCompleted, setMobilityCompleted, STORAGE_KEY } from './store'
-import { workout } from './program'
+import { createSession, emptyState, loadState, saveState, stats, blockCompleted, setBlockCompleted, STORAGE_KEY } from './store'
+import { categories, workout } from './program'
 let values: Map<string, string>
 beforeEach(() => {
   values = new Map()
@@ -14,26 +14,42 @@ describe('personal workout storage', () => {
     expect(s.exercises[15].sets[0].weight).toBe(8)
     expect(s.exercises[0].sets[0].weight).toBeUndefined()
     expect(workout.exercises[9].unit).toBe('seconds')
-    expect(stats(s)).toEqual({ exercises: 0, sets: 0, totalSets: 27 })
+    expect(stats(s)).toEqual({ exercises: 0, sets: 0, totalSets: 22 })
   })
   it('toggles the entire mobility block without changing other exercises or losing legacy values', () => {
     const original = createSession([])
     original.exercises[0].sets[0] = { reps: 9, completed: true }
     original.exercises[15].sets[0] = { reps: 12, weight: 9.5, completed: true }
-    expect(mobilityCompleted(original)).toBe(false)
-    const checked = setMobilityCompleted(original, true)
-    expect(mobilityCompleted(checked)).toBe(true)
-    expect(stats(checked)).toEqual({ exercises: 10, sets: 1, totalSets: 27 })
+    expect(blockCompleted(original, categories[0])).toBe(false)
+    const checked = setBlockCompleted(original, categories[0], true)
+    expect(blockCompleted(checked, categories[0])).toBe(true)
+    expect(stats(checked)).toEqual({ exercises: 10, sets: 1, totalSets: 22 })
     expect(checked.exercises[0].sets[0].reps).toBe(9)
     expect(checked.exercises[15]).toEqual(original.exercises[15])
-    const unchecked = setMobilityCompleted(checked, false)
-    expect(mobilityCompleted(unchecked)).toBe(false)
+    const unchecked = setBlockCompleted(checked, categories[0], false)
+    expect(blockCompleted(unchecked, categories[0])).toBe(false)
     expect(unchecked.exercises.slice(0, 10).every(e => e.sets.every(s => !s.completed))).toBe(true)
     expect(stats(unchecked).exercises).toBe(0)
     const state = { ...emptyState(), active: checked, history: [original] }
     expect(saveState(state)).toBe(true)
     expect(loadState().state).toEqual(state)
-    expect(mobilityCompleted(createSession([checked]))).toBe(false)
+    expect(blockCompleted(createSession([checked]), categories[0])).toBe(false)
+  })
+  it('tracks stretching separately from mobility and preserves saved seconds', () => {
+    const original = createSession([])
+    original.exercises[25].sets[0] = { reps: 45, completed: true }
+    expect(blockCompleted(original, categories[4])).toBe(false)
+    const checked = setBlockCompleted(original, categories[4], true)
+    expect(blockCompleted(checked, categories[4])).toBe(true)
+    expect(blockCompleted(checked, categories[0])).toBe(false)
+    expect(stats(checked)).toEqual({ exercises: 5, sets: 0, totalSets: 22 })
+    expect(checked.exercises[25].sets[0].reps).toBe(45)
+    expect(checked.exercises.slice(0, 25)).toEqual(original.exercises.slice(0, 25))
+    const state = { ...emptyState(), active: checked, history: [original] }
+    expect(saveState(state)).toBe(true)
+    expect(loadState().state).toEqual(state)
+    expect(blockCompleted(setBlockCompleted(checked, categories[4], false), categories[4])).toBe(false)
+    expect(blockCompleted(createSession([checked]), categories[4])).toBe(false)
   })
   it('reuses actual completed values per set, falling back past partial sessions', () => {
     const older = createSession([])
