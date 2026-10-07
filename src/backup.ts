@@ -17,8 +17,10 @@ export function readBackupConfig(): BackupConfig | null {
   } catch { return null }
 }
 export function saveBackupConfig(config: BackupConfig | null): void {
-  if (config) localStorage.setItem(BACKUP_KEY, JSON.stringify(config))
+  const serialized = config ? JSON.stringify(config) : null
+  if (serialized) localStorage.setItem(BACKUP_KEY, serialized)
   else localStorage.removeItem(BACKUP_KEY)
+  if (localStorage.getItem(BACKUP_KEY) !== serialized) throw new BackupError('Не удалось сохранить подключение на телефоне. Проверь доступ к хранилищу.')
 }
 export class BackupError extends Error { constructor(message: string, public status?: number) { super(message) } }
 async function request(config: BackupConfig, path: string, options: RequestInit = {}, signal?: AbortSignal) {
@@ -58,4 +60,13 @@ export function mergeHistory(local: WorkoutSession[], remote: WorkoutSession[]):
 export function pendingSessions(history: WorkoutSession[], config: BackupConfig) {
   const saved = new Set(config.savedIds)
   return history.filter(s => s.finishedAt && !saved.has(s.id))
+}
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
+  if (value && typeof value === 'object') return `{${Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`
+  return JSON.stringify(value)
+}
+export function confirmedSessionIds(local: WorkoutSession[], remote: WorkoutSession[]): string[] {
+  const server = new Map(remote.map(s => [s.id, canonical(s)]))
+  return local.filter(s => server.get(s.id) === canonical(s)).map(s => s.id)
 }

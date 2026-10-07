@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchBackup, mergeHistory, normalizeBackupUrl, pendingSessions, uploadSession } from './backup'
+import { confirmedSessionIds, fetchBackup, mergeHistory, normalizeBackupUrl, pendingSessions, uploadSession } from './backup'
 import { createSession } from './store'
 const config = { url: 'https://backup.example.com', key: 'test-only-access-key-not-a-real-secret', savedIds: [] }
 function completed(id = 'session-test') {
@@ -22,6 +22,12 @@ describe('backup transport and restoration', () => {
   it('queues only finished sessions that have not been acknowledged', () => {
     const a = completed('a'); const b = completed('b')
     expect(pendingSessions([a, b, createSession([])], { ...config, savedIds: ['a'] })).toEqual([b])
+  })
+  it('reconciles acknowledgements against actual server records independent of object key order', () => {
+    const a = completed('a'); const b = completed('b'); const missing = completed('missing')
+    const reordered = { exercises: a.exercises, finishedAt: a.finishedAt, startedAt: a.startedAt, workoutId: a.workoutId, id: a.id }
+    const conflict = { ...b, exercises: b.exercises.map((e, i) => i ? e : { ...e, sets: e.sets.map(s => ({ ...s, reps: s.reps + 1 })) }) }
+    expect(confirmedSessionIds([a, b, missing], [reordered, conflict])).toEqual(['a'])
   })
   it('requires a matching database acknowledgement and avoids redirects and credential cookies', async () => {
     const request = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ saved: true, id: 'session-test' }) })

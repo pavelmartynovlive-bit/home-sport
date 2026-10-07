@@ -12,20 +12,20 @@ export default function BackupPanel({ backup }: { backup: Backup }) {
   async function connect(event: React.FormEvent) {
     event.preventDefault()
     setWorking(true); setMessage('')
-    try { await backup.connect(url, key); setEditing(false); setKey(''); setMessage('Сервер подключён. Существующая история тоже будет отправлена.') }
+    try { await backup.connect(url, key); setEditing(false); setKey(''); setMessage('Подключение сохранено на телефоне. Проверяем историю и отправляем недостающие тренировки.') }
     catch (error) { setMessage(error instanceof BackupError ? error.message : 'Не удалось подключиться. Проверь адрес, HTTPS и доступность сервера.') }
     finally { setWorking(false) }
   }
   async function restore() {
     setWorking(true); setMessage('')
-    try { const added = await backup.restore(); setMessage(added ? `Добавлено тренировок: ${added}. Текущая сессия сохранена.` : 'Новых тренировок в копии нет.') }
+    try { const added = await backup.restore(); setMessage(added ? `Добавлено тренировок: ${added}. Текущая сессия сохранена.` : 'Новых тренировок в копии нет. Текущая сессия сохранена.') }
     catch (error) { setMessage(error instanceof BackupError ? error.message : 'Не удалось получить копию. Проверь доступ к хранилищу и попробуй позже.') }
     finally { setWorking(false) }
   }
   return <section className="backup-panel">
     <h2>Резервная копия</h2>
     <p className="backup-status" role="status">Сохранено на телефоне. {backup.status}{backup.pending > 0 && ` · ожидают отправки: ${backup.pending}`}</p>
-    <p className="backup-explanation">Завершённые тренировки копируются на твой сервер. Без интернета отправим их при следующем открытии. Незавершённая тренировка остаётся на телефоне.</p>
+    <p className="backup-explanation">При открытии проверяем копию на сервере: возвращаем недостающую историю и отправляем завершённые тренировки. Без интернета повторим позже. Незавершённая тренировка остаётся на телефоне.</p>
     {backup.config && <>
       <p className="backup-address">{backup.config.url}</p>
       <button className="button secondary" disabled={disabled} onClick={() => void backup.sync()}>Отправить копию сейчас</button>

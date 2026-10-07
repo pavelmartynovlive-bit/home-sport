@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BackupError, fetchBackup, mergeHistory, normalizeBackupUrl, pendingSessions, readBackupConfig, saveBackupConfig, uploadSession } from './backup'
+import { BackupError, confirmedSessionIds, fetchBackup, mergeHistory, normalizeBackupUrl, pendingSessions, readBackupConfig, saveBackupConfig, uploadSession } from './backup'
 import type { BackupConfig } from './backup'
 import { saveState } from './store'
-import type { StoredState } from './types'
+import type { StoredState, WorkoutSession } from './types'
 export function useBackup(state: StoredState, setState: (state: StoredState) => void) {
   const [config, setConfig] = useState(readBackupConfig)
   const [status, setStatus] = useState('')
@@ -15,13 +15,12 @@ export function useBackup(state: StoredState, setState: (state: StoredState) => 
   const connect = async (url: string, key: string) => {
     if (key.trim().length < 32) throw new BackupError('Проверь ключ доступа: нужно не меньше 32 символов.')
     const candidate: BackupConfig = { url: normalizeBackupUrl(url), key: key.trim(), savedIds: [] }
-    // Authenticate before persisting a new destination or sending any workouts.
     await fetchBackup(candidate)
     running.current?.abort()
     try { saveBackupConfig(candidate) } catch { throw new BackupError('Не удалось сохранить подключение на телефоне. Проверь доступ к хранилищу.') }
     configRef.current = candidate
     setConfig(candidate)
-    setStatus('Подключено. Готовим резервную копию.')
+    setStatus('Подключено. Проверяем историю на сервере…')
   }
   const disconnect = () => {
     saveBackupConfig(null)
@@ -30,34 +29,60 @@ export function useBackup(state: StoredState, setState: (state: StoredState) => 
     setConfig(null)
     setStatus('')
   }
+  const mergeRemote = useCallback((current: BackupConfig, remote: WorkoutSession[]) => {
+    const latest = stateRef.current
+    const merged = mergeHistory(latest.history, remote)
+    const added = merged.length - latest.history.length
+    if (added) {
+      const updatedState = { ...latest, history: merged }
+      if (!saveState(updatedState)) throw new BackupError('Не удалось сохранить восстановленные тренировки на телефоне.')
+      stateRef.current = updatedState
+      setState(updatedState)
+    }
+    // The server inventory is authoritative for acknowledgements, even after a snapshot restore.
+    const updated = { ...current, savedIds: confirmedSessionIds(merged, remote) }
+    saveBackupConfig(updated)
+    configRef.current = updated
+    setConfig(updated)
+    return added
+  }, [setState])
   const sync = useCallback(async () => {
     const current = configRef.current
-    if (!current || (running.current && !running.current.signal.aborted) || !navigator.onLine) return
-    const pending = pendingSessions(stateRef.current.history, current)
-    if (!pending.length) return
+    if (!current || (running.current && !running.current.signal.aborted)) return
+    if (!navigator.onLine) { setStatus('Нет связи. Проверим копию при появлении интернета.'); return }
     const controller = new AbortController()
     running.current = controller
     setBusy(true)
-    setStatus('Отправляем копию…')
+    setStatus('Проверяем историю на сервере…')
     try {
+      const remote = await fetchBackup(current, controller.signal)
+      if (configRef.current?.url !== current.url || configRef.current?.key !== current.key || controller.signal.aborted) return
+      mergeRemote(current, remote)
+      const pending = pendingSessions(stateRef.current.history, configRef.current!)
+      let conflict = ''
+      if (pending.length) setStatus('Отправляем копию…')
       for (const session of pending) {
-        await uploadSession(current, session, controller.signal)
+        try { await uploadSession(current, session, controller.signal) }
+        catch (error) {
+          // A conflicting record must not block backups of other workouts.
+          if (error instanceof BackupError && error.status === 409) { conflict = error.message; continue }
+          throw error
+        }
         if (configRef.current?.url !== current.url || configRef.current?.key !== current.key || controller.signal.aborted) return
-        const updated = { ...configRef.current, savedIds: [...new Set([...configRef.current.savedIds, session.id])] }
-        // Mark acknowledged only after the API confirms the committed database write.
+        const updated: BackupConfig = { ...configRef.current, savedIds: [...new Set([...configRef.current.savedIds, session.id])] }
         saveBackupConfig(updated)
         configRef.current = updated
         setConfig(updated)
       }
-      setStatus(pendingSessions(stateRef.current.history, configRef.current!).length ? 'Ожидает отправки' : 'Копия на сервере сохранена')
+      setStatus(conflict || (pendingSessions(stateRef.current.history, configRef.current!).length ? 'Ожидает отправки' : stateRef.current.history.length ? 'Копия на сервере сохранена' : 'На сервере пока нет тренировок'))
     } catch (error) {
-      if (!controller.signal.aborted) setStatus(error instanceof BackupError ? error.message : 'Ожидает отправки. Повторим, когда приложение будет открыто и появится связь.')
+      if (!controller.signal.aborted) setStatus(error instanceof BackupError ? error.message : `${pendingSessions(stateRef.current.history, configRef.current || current).length ? 'Ожидает отправки. ' : ''}Не удалось проверить или отправить копию. Тренировки на телефоне сохранены. Повторим при появлении связи.`)
     } finally {
       if (running.current === controller) { running.current = null; setBusy(false) }
     }
-  }, [])
+  }, [mergeRemote])
   const restore = async () => {
-    if (running.current || !configRef.current) throw new BackupError('Дождись завершения отправки.')
+    if (running.current || !configRef.current) throw new BackupError('Дождись завершения проверки или отправки.')
     const current = configRef.current
     const controller = new AbortController()
     running.current = controller
@@ -65,19 +90,7 @@ export function useBackup(state: StoredState, setState: (state: StoredState) => 
     try {
       const remote = await fetchBackup(current, controller.signal)
       if (controller.signal.aborted || configRef.current?.url !== current.url || configRef.current?.key !== current.key) return 0
-      const latest = stateRef.current
-      const merged = mergeHistory(latest.history, remote)
-      const added = merged.length - latest.history.length
-      const updatedState = { ...latest, history: merged }
-      if (!saveState(updatedState)) throw new BackupError('Не удалось сохранить восстановленные тренировки на телефоне.')
-      stateRef.current = updatedState
-      setState(updatedState)
-      // Colliding local IDs are deliberately left pending; the server will detect conflicts.
-      const restored = remote.filter(s => !latest.history.some(local => local.id === s.id)).map(s => s.id)
-      const updatedConfig = { ...current, savedIds: [...new Set([...current.savedIds, ...restored])] }
-      saveBackupConfig(updatedConfig)
-      configRef.current = updatedConfig
-      setConfig(updatedConfig)
+      const added = mergeRemote(current, remote)
       setStatus(`Восстановлено тренировок: ${added}`)
       return added
     } finally {
@@ -94,6 +107,6 @@ export function useBackup(state: StoredState, setState: (state: StoredState) => 
   }, [sync, state.history, config?.url, config?.key])
   useEffect(() => () => running.current?.abort(), [])
   const pending = config ? pendingSessions(state.history, config).length : 0
-  const displayedStatus = pending && !busy && (!status || status === 'Копия на сервере сохранена') ? 'Ожидает отправки' : status
-  return { config, busy, pending, status: config ? displayedStatus || (pending ? 'Ожидает отправки' : 'Копия на сервере сохранена') : 'Копия на сервере не подключена', connect, disconnect, sync, restore }
+  const displayedStatus = pending && !busy && status === 'Копия на сервере сохранена' ? 'Ожидает отправки' : status
+  return { config, busy, pending, status: config ? displayedStatus || 'Проверяем подключение к серверу…' : 'Копия на сервере не подключена', connect, disconnect, sync, restore }
 }
