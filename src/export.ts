@@ -1,20 +1,20 @@
 import { categories, workout } from './program'
-import { blockCompleted, minutes, sessionExerciseTitle, stats } from './store'
+import { blockCompleted, minutes, sessionExercise, sessionExerciseTitle, stats } from './store'
 import type { WorkoutSession } from './types'
 
 export function formatWorkoutResults(session: WorkoutSession): string {
   const totals = stats(session)
   const date = new Date(session.startedAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })
-  const lines = [workout.title, date, `Время: ${minutes(session)} мин`, `Упражнения: ${totals.exercises} / ${workout.exercises.length}`, `Подходы: ${totals.sets} / ${totals.totalSets}`]
+  const lines = [workout.title, date, `Время: ${minutes(session)} мин`, `Упражнения: ${totals.exercises} / ${session.exercises.length}`, `Подходы: ${totals.sets} / ${totals.totalSets}`]
   for (const category of categories) {
     lines.push('', category)
-    const entries = session.exercises.filter((_, i) => workout.exercises[i].category === category)
+    const entries = session.exercises.filter(e => sessionExercise(e.exerciseId).category === category)
     if (category === categories[0] || category === categories[4]) {
       lines.push(blockCompleted(session, category) ? '✓ Блок выполнен' : entries.some(e => e.sets.some(s => s.completed)) ? 'Блок выполнен частично' : '— Блок пропущен')
       continue
     }
     for (const entry of entries) {
-      const exercise = workout.exercises.find(e => e.id === (entry.exerciseId === 'shrugs' ? 'floor-press' : entry.exerciseId))!
+      const exercise = sessionExercise(entry.exerciseId)
       lines.push(sessionExerciseTitle(entry.exerciseId))
       entry.sets.forEach((set, index) => {
         const label = exercise.sets[index].label

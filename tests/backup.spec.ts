@@ -357,3 +357,25 @@ test('restoring a legacy shrugs draft replaces only that exercise without a serv
   expect(restored.exercises.filter((_: unknown, i: number) => i !== 17)).toEqual(legacy.exercises.filter((_: unknown, i: number) => i !== 17))
   await expect(page.locator('.draft-status')).toContainText('Текущая тренировка сохранена на сервере')
 })
+
+test('restores a legacy 30-exercise draft, removes calf raises and syncs 29 exercises without rewriting history', async ({ page }) => {
+  const finished = await draftSession(page, 'legacy-calves-history')
+  finished.exercises.splice(22, 0, { exerciseId: 'calf-raise', sets: [{ reps: 19, completed: true }, { reps: 17, completed: false }] })
+  finished.exercises[23].sets[0] = { reps: 14, completed: true }
+  expect((await page.request.put(`${endpoint}/v1/sessions/${finished.id}`, { headers: { Authorization: `Bearer ${testKey}` }, data: finished })).ok()).toBe(true)
+  const { finishedAt: _, ...legacy } = { ...finished, id: 'legacy-calves-draft' }
+  expect((await page.request.put(`${endpoint}/v1/draft`, { headers: { Authorization: `Bearer ${testKey}` }, data: { version: 1, revision: 0, session: legacy } })).ok()).toBe(true)
+  await page.evaluate(() => localStorage.clear())
+  await connectBackup(page)
+  await expect.poll(async () => (await serverDraft(page)).session?.exercises.length, { timeout: 10000 }).toBe(29)
+  const restored = (await serverDraft(page)).session
+  expect(restored.exercises).toEqual(legacy.exercises.filter(e => e.exerciseId !== 'calf-raise'))
+  await expect(page.locator('.draft-status')).toContainText('Текущая тренировка сохранена на сервере')
+  const history = await page.request.get(`${endpoint}/v1/sessions`, { headers: { Authorization: `Bearer ${testKey}` } })
+  expect((await history.json()).sessions).toEqual([finished])
+  await page.getByRole('button', { name: 'На главную' }).first().click()
+  await page.getByRole('button', { name: 'История тренировок', exact: true }).click()
+  await expect(page.locator('.history-card')).toContainText('/ 30 упражнений')
+  await page.locator('.history-card').click()
+  await expect(page.getByRole('heading', { name: 'Подъёмы на носки', exact: true })).toBeVisible()
+})
