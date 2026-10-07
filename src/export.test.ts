@@ -4,6 +4,12 @@ import { createSession, setBlockCompleted } from './store'
 import { categories } from './program'
 
 describe('workout text for messages', () => {
+  it('keeps historical shrugs correctly named without rewriting them as floor presses', () => {
+    const session = createSession([])
+    session.exercises[17].exerciseId = 'shrugs'
+    expect(formatWorkoutResults(session)).toContain('Шраги')
+    expect(formatWorkoutResults(session)).not.toContain('Жим гантелей лёжа на полу')
+  })
   it('exports distinct actual weights, completed and skipped sets, labels and whole-block status', () => {
     const session = setBlockCompleted(createSession([], new Date('2026-10-06T10:00:00Z')), categories[0], true)
     session.finishedAt = '2026-10-06T10:42:00Z'

@@ -8,9 +8,21 @@ export function isSession(value: unknown): value is WorkoutSession {
   return typeof s.id === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(s.id) && s.workoutId === workout.id && typeof s.startedAt === 'string' && Number.isFinite(Date.parse(s.startedAt)) &&
     (s.finishedAt === undefined || (typeof s.finishedAt === 'string' && Number.isFinite(Date.parse(s.finishedAt)))) &&
     Array.isArray(s.exercises) && s.exercises.length === workout.exercises.length &&
-    s.exercises.every((e, i) => !!e && typeof e === 'object' && e.exerciseId === workout.exercises[i].id && Array.isArray(e.sets) && e.sets.length === workout.exercises[i].sets.length &&
+    s.exercises.every((e, i) => !!e && typeof e === 'object' && (e.exerciseId === workout.exercises[i].id || (e.exerciseId === 'shrugs' && workout.exercises[i].id === 'floor-press')) && Array.isArray(e.sets) && e.sets.length === workout.exercises[i].sets.length &&
       e.sets.every(set => !!set && typeof set === 'object' && Number.isFinite(set.reps) && set.reps >= 0 && typeof set.completed === 'boolean' &&
         (workout.exercises[i].defaultWeight === undefined ? set.weight === undefined : Number.isFinite(set.weight) && set.weight! >= 0)))
+}
+// Keep completed legacy records unchanged: the backup API treats history as immutable.
+export function sessionExerciseTitle(exerciseId: string): string {
+  return exerciseId === 'shrugs' ? 'Шраги' : workout.exercises.find(e => e.id === exerciseId)!.title
+}
+export function upgradeActiveSession(session: WorkoutSession): WorkoutSession {
+  const index = workout.exercises.findIndex(e => e.id === 'floor-press')
+  if (session.exercises[index].exerciseId !== 'shrugs') return session
+  const exercise = workout.exercises[index]
+  return { ...session, exercises: session.exercises.map((entry, i) => i !== index ? entry : {
+    exerciseId: exercise.id, sets: exercise.sets.map(set => ({ reps: set.reps, weight: exercise.defaultWeight, completed: false })),
+  }) }
 }
 export function loadState(): { state: StoredState; error: string | null } {
   try {
@@ -18,6 +30,11 @@ export function loadState(): { state: StoredState; error: string | null } {
     if (!raw) return { state: emptyState(), error: null }
     const parsed = JSON.parse(raw)
     if (parsed.version !== 1 || !Array.isArray(parsed.history) || !parsed.history.every(isSession) || !(parsed.active === null || isSession(parsed.active))) throw new Error('invalid')
+    const active = parsed.active ? upgradeActiveSession(parsed.active) : null
+    if (active !== parsed.active) {
+      const state = { ...parsed, active }
+      return { state, error: saveState(state) ? null : 'Не удалось сохранить обновлённую текущую тренировку. Проверь доступ к хранилищу.' }
+    }
     return { state: parsed, error: null }
   } catch { return { state: emptyState(), error: 'Не удалось прочитать сохранённые данные. Исходная запись не изменена. Освободи место или проверь доступ к хранилищу.' } }
 }

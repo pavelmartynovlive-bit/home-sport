@@ -343,3 +343,17 @@ test('finishing while a draft upload is in flight still uploads history and prev
   await page.reload()
   await expect(page.getByRole('button', { name: 'Начать тренировку' })).toBeVisible()
 })
+
+test('restoring a legacy shrugs draft replaces only that exercise without a server conflict', async ({ page }) => {
+  const finished = await draftSession(page, 'legacy-shrugs-draft')
+  const { finishedAt: _, ...legacy } = finished
+  legacy.exercises[17] = { exerciseId: 'shrugs', sets: [{ reps: 18, weight: 12, completed: true }, { reps: 16, weight: 12, completed: false }] }
+  expect((await page.request.put(`${endpoint}/v1/draft`, { headers: { Authorization: `Bearer ${testKey}` }, data: { version: 1, revision: 0, session: legacy } })).ok()).toBe(true)
+  await page.evaluate(() => localStorage.clear())
+  await connectBackup(page)
+  await expect.poll(async () => (await serverDraft(page)).session?.exercises[17].exerciseId, { timeout: 10000 }).toBe('floor-press')
+  const restored = (await serverDraft(page)).session
+  expect(restored.exercises[17].sets).toEqual([{ reps: 15, weight: 8, completed: false }, { reps: 15, weight: 8, completed: false }])
+  expect(restored.exercises.filter((_: unknown, i: number) => i !== 17)).toEqual(legacy.exercises.filter((_: unknown, i: number) => i !== 17))
+  await expect(page.locator('.draft-status')).toContainText('Текущая тренировка сохранена на сервере')
+})

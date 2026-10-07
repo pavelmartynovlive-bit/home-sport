@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { BackupError, canUpdateDraft, confirmedSessionIds, fetchBackup, fetchDraft, mergeHistory, normalizeBackupUrl, pendingSessions, readBackupConfig, sameSession, saveBackupConfig, uploadDraft, uploadSession } from './backup'
 import type { BackupConfig } from './backup'
-import { saveState } from './store'
+import { saveState, upgradeActiveSession } from './store'
 import type { StoredState, WorkoutSession } from './types'
 export function useBackup(state: StoredState, setState: (state: StoredState) => void) {
   const [config, setConfig] = useState(readBackupConfig)
@@ -66,7 +66,7 @@ export function useBackup(state: StoredState, setState: (state: StoredState) => 
       const active = latest.active
       draftAttempt.current = active
       if (!active && remote.session && !latest.history.some(s => s.id === remote.session!.id)) {
-        const updated = { ...latest, active: remote.session }
+        const updated = { ...latest, active: upgradeActiveSession(remote.session) }
         if (!saveState(updated)) throw new BackupError('Не удалось восстановить текущую тренировку на телефоне.')
         stateRef.current = updated; setState(updated)
       } else if (active && !sameSession(active, remote.session)) {

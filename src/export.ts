@@ -1,5 +1,5 @@
 import { categories, workout } from './program'
-import { blockCompleted, minutes, stats } from './store'
+import { blockCompleted, minutes, sessionExerciseTitle, stats } from './store'
 import type { WorkoutSession } from './types'
 
 export function formatWorkoutResults(session: WorkoutSession): string {
@@ -14,8 +14,8 @@ export function formatWorkoutResults(session: WorkoutSession): string {
       continue
     }
     for (const entry of entries) {
-      const exercise = workout.exercises.find(e => e.id === entry.exerciseId)!
-      lines.push(exercise.title)
+      const exercise = workout.exercises.find(e => e.id === (entry.exerciseId === 'shrugs' ? 'floor-press' : entry.exerciseId))!
+      lines.push(sessionExerciseTitle(entry.exerciseId))
       entry.sets.forEach((set, index) => {
         const label = exercise.sets[index].label
         const weight = set.weight !== undefined ? `${set.weight.toLocaleString('ru-RU')} кг × ` : ''

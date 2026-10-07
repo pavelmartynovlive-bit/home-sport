@@ -4,7 +4,7 @@ import CopyResults from './CopyResults'
 import BackupPanel from './BackupPanel'
 import { useBackup } from './useBackup'
 import { categories, isBlockExercise, workout } from './program'
-import { createSession, loadState, minutes, blockCompleted, saveState, setBlockCompleted, stats } from './store'
+import { createSession, loadState, minutes, blockCompleted, saveState, sessionExerciseTitle, setBlockCompleted, stats } from './store'
 import type { CompletedSet, StoredState, WorkoutExercise, WorkoutSession } from './types'
 
 type Screen = 'home' | 'workout' | 'focus' | 'summary' | 'history' | 'detail' | 'backup'
@@ -121,7 +121,7 @@ export default function App() {
       const partial = entries.some(e => e.sets.some(s => s.completed))
       return [<article className="result-row" key={category}><div><h3>{category}</h3><p>{complete ? 'Блок выполнен' : partial ? 'Блок выполнен частично' : 'Блок пропущен'}</p></div>{complete && <span className="result-check"><Icon name="check"/></span>}</article>]
     }
-    return session.exercises.flatMap((entry, i) => workout.exercises[i].category !== category ? [] : [<article className="result-row" key={entry.exerciseId}><div><h3>{workout.exercises[i].title}</h3>{entry.sets.map((set, j) => <p key={j}>{entry.sets.length > 1 && `Подход ${j + 1}: `}{set.weight !== undefined && `${set.weight} кг × `}{set.reps} {unit(workout.exercises[i])}{set.completed ? ' · выполнен' : ' · пропущен'}</p>)}</div><span className={entry.sets.every(s => s.completed) ? 'result-check' : 'muted'}>{entry.sets.every(s => s.completed) ? <Icon name="check"/> : '—'}</span></article>])
+    return session.exercises.flatMap((entry, i) => workout.exercises[i].category !== category ? [] : [<article className="result-row" key={entry.exerciseId}><div><h3>{sessionExerciseTitle(entry.exerciseId)}</h3>{entry.sets.map((set, j) => <p key={j}>{entry.sets.length > 1 && `Подход ${j + 1}: `}{set.weight !== undefined && `${set.weight} кг × `}{set.reps} {unit(workout.exercises[i])}{set.completed ? ' · выполнен' : ' · пропущен'}</p>)}</div><span className={entry.sets.every(s => s.completed) ? 'result-check' : 'muted'}>{entry.sets.every(s => s.completed) ? <Icon name="check"/> : '—'}</span></article>])
   }) }
   return <div className="app-shell">
     <header className="app-header"><button className="brand" onClick={() => go('home')} aria-label="На главную"><span className="brand-mark"><Icon name="home" size={21}/></span>дома<span className="brand-dot">.</span></button><span className="local-label"><span className={`status-dot ${online ? '' : 'offline'}`}/>{online ? 'Твой ритм. Твоё пространство.' : 'Офлайн · всё под рукой'}</span></header>

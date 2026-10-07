@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { createSession, emptyState, loadState, saveState, stats, blockCompleted, setBlockCompleted, STORAGE_KEY } from './store'
+import { createSession, emptyState, isSession, loadState, saveState, stats, blockCompleted, setBlockCompleted, STORAGE_KEY } from './store'
 import { categories, workout } from './program'
 let values: Map<string, string>
 beforeEach(() => {
@@ -7,6 +7,23 @@ beforeEach(() => {
   vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value) })
 })
 describe('personal workout storage', () => {
+  it('replaces shrugs with floor press while preserving immutable legacy history and other active exercises', () => {
+    const index = workout.exercises.findIndex(e => e.id === 'floor-press')
+    expect(workout.exercises.some(e => e.id === 'shrugs')).toBe(false)
+    const legacy = createSession([])
+    legacy.exercises[index] = { exerciseId: 'shrugs', sets: [{ reps: 18, weight: 12, completed: true }, { reps: 16, weight: 12, completed: false }] }
+    legacy.exercises[15].sets[0] = { reps: 12, weight: 9.5, completed: true }
+    const history = [{ ...legacy, id: 'legacy-history', finishedAt: new Date().toISOString() }]
+    expect(isSession(history[0])).toBe(true)
+    expect(createSession(history).exercises[index]).toEqual({ exerciseId: 'floor-press', sets: [{ reps: 15, weight: 8, completed: false }, { reps: 15, weight: 8, completed: false }] })
+    saveState({ ...emptyState(), active: legacy, history })
+    const restored = loadState()
+    expect(restored.error).toBeNull()
+    expect(restored.state.history).toEqual(history)
+    expect(restored.state.active?.exercises[index]).toEqual(createSession([]).exercises[index])
+    expect(restored.state.active?.exercises.filter((_, i) => i !== index)).toEqual(legacy.exercises.filter((_, i) => i !== index))
+    expect(loadState()).toEqual(restored)
+  })
   it('contains the complete 30-exercise program, with distinct timed and weighted sets', () => {
     const s = createSession([])
     expect(s.exercises).toHaveLength(30)

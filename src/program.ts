@@ -1,7 +1,7 @@
 import type { Workout, WorkoutExercise } from './types'
 export const categories = ['Корпус + мобилити', 'Плечи', 'Верх тела', 'Ноги', 'Растяжка']
 function exercise(id: string, title: string, category: number, plan: string, reps: number[], tips: string[], options: Partial<WorkoutExercise> = {}): WorkoutExercise {
-  return { id, title, category: categories[category], type: category === 4 ? 'stretch' : category === 2 || category === 3 ? 'strength' : 'mobility', plan, unit: category === 4 ? 'seconds' : 'reps', sets: reps.map(reps => ({ reps })), tips, techniqueMedia: `${import.meta.env.BASE_URL}exercises/${id}.gif`, ...options }
+  return { id, title, category: categories[category], type: category === 4 ? 'stretch' : category === 2 || category === 3 ? 'strength' : 'mobility', plan, unit: category === 4 ? 'seconds' : 'reps', sets: reps.map(reps => ({ reps })), tips, techniqueMedia: `${import.meta.env.BASE_URL}exercises/${id}.webp`, ...options }
 }
 export const isMobilityExercise = (exercise: WorkoutExercise) => exercise.category === categories[0]
 export const isBlockExercise = (exercise: WorkoutExercise) => isMobilityExercise(exercise) || exercise.category === categories[4]
@@ -24,7 +24,7 @@ export const workout: Workout = { id: 'home', title: 'Домашняя трен�
   exercise('shoulder-press', 'Жим гантелей вверх сидя со спинкой, нейтральный хват', 2, '2 × 15', [15, 15], ['Сядь устойчиво, держи корпус собранным.', 'Поднимай гантели вверх без прогиба в пояснице.', 'Не поднимай плечи к ушам.'], dumbbells),
   exercise('dumbbell-row', 'Тяга двух гантелей к поясу', 2, '2 × 15', [15, 15], ['Спина нейтральная, наклон от тазобедренных суставов.', 'Локти идут назад, к поясу.', 'Не поднимай плечи, опускай гантели под контролем.'], dumbbells),
   exercise('triceps-extension', 'Разгибание на трицепс из-за головы', 2, '2 × 10–15', [15, 15], ['Держи одну гантель двумя руками.', 'Локти направлены вперёд, корпус устойчивый.', 'Опускай гантель в комфортной амплитуде.'], { defaultWeight: 8, weightNote: 'кг · одна гантель' }),
-  exercise('floor-press', 'Жим гантелей лёжа на полу', 2, '2 × 10–15', [15, 15], ['Ляг на спину, согни колени и поставь стопы на пол.', 'Держи локти примерно под 30–45° к корпусу.', 'Выжимай гантели вверх и опускай под контролем до лёгкого касания трицепсом пола.'], dumbbells),
+  exercise('floor-press', 'Жим гантелей лёжа на полу', 2, '2 × 10–15', [15, 15], ['Лечь на спину, согнуть колени, стопы поставить на пол.', 'Локти держать примерно под 30–45° к корпусу.', 'Выжимать гантели вверх и медленно опускать до лёгкого касания трицепсом пола.'], dumbbells),
   exercise('leg-forward', 'Мах прямой ногой вперёд с резинкой', 3, '10 на сторону', [10], ['Держись за устойчивую опору.', 'Поднимай прямую ногу вперёд без наклона корпуса.', 'Возвращай ногу плавно, выполни обе стороны.']),
   exercise('leg-back', 'Мах прямой ногой назад', 3, '10 на сторону', [10], ['Сохраняй таз направленным вперёд.', 'Отводи ногу назад без прогиба поясницы.', 'Используй небольшую контролируемую амплитуду.']),
   exercise('leg-side', 'Отведение ноги в сторону', 3, '10 на сторону', [10], ['Держись за опору и сохраняй корпус вертикальным.', 'Отводи ногу в сторону, носок смотрит вперёд.', 'Не наклоняй таз, выполни обе стороны.']),
