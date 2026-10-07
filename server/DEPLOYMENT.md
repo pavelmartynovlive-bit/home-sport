@@ -1,0 +1,38 @@
+# Развёртывание Home Sport
+
+Проверено 7 октября 2026. PWA: https://pavelmartynovlive-bit.github.io/home-sport/
+
+## Рабочий API
+
+Адрес подключения: **https://home-sport.132-243-23-229.sslip.io**.
+
+VPS `132.243.23.229`, Ubuntu 24.04 / Python 3.12. systemd `home-sport` запускает `/opt/home-sport/server/server.py` на `127.0.0.1:8789`. Отдельный nginx host `/etc/nginx/sites-available/home-sport.conf` проксирует HTTPS. Старый pasha-music и VPN сохранены. Перед изменениями nginx сохранена копия `/root/home-sport-nginx-backup.*`.
+
+Ключ: `/etc/home-sport.env` (0600), база: `/var/lib/home-sport/sessions.sqlite3` в закрытом каталоге. Секретов в репозитории нет.
+
+Certbot автоматически продлевает сертификат; dry-run прошёл. Deploy hook `/etc/letsencrypt/renewal-hooks/deploy/home-sport-nginx-reload` проверяет конфигурацию и выполняет reload nginx.
+
+## Копии базы
+
+`home-sport-snapshot.timer` делает согласованный снимок SQLite ежедневно в 03:15 по Москве через `/usr/local/sbin/home-sport-snapshot`. Снимки: `/var/backups/home-sport/history-*.sqlite3`, права 0600.
+
+LaunchAgent Mac `ru.home-sport.backup` (`~/Library/LaunchAgents/ru.home-sport.backup.plist`) создаёт свежий снимок, скачивает накопленные снимки по SSH/rsync в `~/Backups/home-sport`, проверяет SQLite integrity_check. Запускается при загрузке и в 03:30 по времени Mac; при сне календарная задача выполняется после пробуждения. Нужны вошедший пользователь, включённый Mac и доступная сеть. Есть три попытки связи; `IPQoS=none` используется для совместимости с текущим подключением. Снимки не удаляются автоматически.
+
+Скрипт: `~/Library/Application Support/HomeSport/backup-vps.sh`; логи рядом: `backup.log` / `backup-error.log`. Каталоги закрыты правами 0700, файлы 0600. Первая внешняя копия и целостность скачанных баз проверены, LaunchAgent завершился с кодом 0. При выключенном Mac внешнее копирование не работает; постоянно доступное внешнее хранилище можно добавить позднее.
+
+## Подключение телефона
+
+Закрытый файл Mac `~/Library/Application Support/HomeSport/phone-connection.txt` содержит адрес и ключ для ввода в PWA → «Резервная копия». `server-recovery.env` рядом сохранён для восстановления конфигурации сервера. Не публикуй эти файлы и не присылай ключ в чат. Сохрани адрес и ключ в менеджере паролей. После подключения дождись подтверждения сохранения истории. После переустановки телефона введи их заново и нажми восстановление.
+
+Телефон в этой сессии недоступен: перенос ключа и проверка личной истории на нём выполняются пользователем. Не очищай настоящую историю для теста восстановления.
+
+## Выполненные проверки
+
+- Пять серверных тестов на VPS.
+- Production HTTPS /health, отказ без/с неверным ключом, CORS и отказ чужому origin.
+- Реальные HTTPS PUT/GET, повтор без дубля, сохранность после рестарта.
+- Согласованный снимок содержит записанные данные; integrity_check успешен.
+- Скачанные на Mac снимки проверены в immutable/read-only режиме.
+- Certbot renewal dry-run успешен, nginx -t успешен.
+
+Диагностическая запись и снимки только с диагностическими данными удалены. Пользовательская история сохранена. Инструкция восстановления базы — `server/README.md`.
