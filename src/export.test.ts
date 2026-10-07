@@ -10,14 +10,27 @@ describe('workout text for messages', () => {
     expect(formatWorkoutResults(session)).toContain('Шраги')
     expect(formatWorkoutResults(session)).not.toContain('Жим гантелей лёжа на полу')
   })
+  it('exports legacy calf raises in the correct block with original totals', () => {
+    const session = createSession([])
+    session.exercises.splice(22, 0, { exerciseId: 'calf-raise', sets: [{ reps: 19, completed: true }, { reps: 17, completed: false }] })
+    const before = JSON.stringify(session)
+    const text = formatWorkoutResults(session)
+    expect(text).toContain('Упражнения: 0 / 30')
+    expect(text).toContain('Подходы: 1 / 22')
+    expect(text).toContain('Подъёмы на носки\n  Подход 1: 19 повт.')
+    expect(text.indexOf('Подъёмы на носки')).toBeGreaterThan(text.indexOf('Ноги'))
+    expect(text.indexOf('Подъёмы на носки')).toBeLessThan(text.indexOf('Растяжка'))
+    expect(JSON.stringify(session)).toBe(before)
+    expect(formatWorkoutResults(createSession([]))).not.toContain('Подъёмы на носки')
+  })
   it('exports distinct actual weights, completed and skipped sets, labels and whole-block status', () => {
     const session = setBlockCompleted(createSession([], new Date('2026-10-06T10:00:00Z')), categories[0], true)
     session.finishedAt = '2026-10-06T10:42:00Z'
     session.exercises[15].sets = [{ weight: 9.5, reps: 12, completed: true }, { weight: 7, reps: 10, completed: false }]
     const text = formatWorkoutResults(session)
     expect(text).toContain('Время: 42 мин')
-    expect(text).toContain('Упражнения: 10 / 30')
-    expect(text).toContain('Подходы: 1 / 22')
+    expect(text).toContain('Упражнения: 10 / 29')
+    expect(text).toContain('Подходы: 1 / 20')
     expect(text).toContain('Подход 1: 9,5 кг × 12 повт. · ✓ выполнен')
     expect(text).toContain('Подход 2: 7 кг × 10 повт. · — не выполнен')
     expect(text).toContain('Молотки · 8 + 8 + 8')
@@ -29,7 +42,7 @@ describe('workout text for messages', () => {
   })
   it('keeps old partially completed block results explicit without changing data', () => {
     const session = createSession([])
-    session.exercises[25].sets[0].completed = true
+    session.exercises[24].sets[0].completed = true
     const before = JSON.stringify(session)
     expect(formatWorkoutResults(session)).toContain('Растяжка\nБлок выполнен частично')
     expect(JSON.stringify(session)).toBe(before)

@@ -37,6 +37,20 @@ class BackupTests(unittest.TestCase):
             response = e
         body = response.read()
         return response.status, json.loads(body) if body else None, response.headers
+    def test_new_29_exercise_sessions_and_drafts_with_legacy_history(self):
+        self.assertEqual(self.request('/v1/sessions/session-test', 'PUT', self.session)[0], 201)
+        current = copy.deepcopy(self.session)
+        current['id'] = 'current-29'
+        current['exercises'].pop(22)
+        draft = copy.deepcopy(current); del draft['finishedAt']
+        self.assertEqual(self.request('/v1/draft', 'PUT', {'version': 1, 'revision': 0, 'session': draft})[0], 200)
+        self.assertEqual(self.request('/v1/draft')[1]['session'], draft)
+        invalid = copy.deepcopy(current); invalid['exercises'].pop()
+        self.assertEqual(self.request('/v1/sessions/current-29', 'PUT', invalid)[0], 400)
+        self.assertEqual(self.request('/v1/sessions/current-29', 'PUT', current)[0], 201)
+        self.assertEqual(self.request('/v1/draft')[1]['session'], None)
+        self.assertCountEqual(self.request('/v1/sessions')[1]['sessions'], [self.session, current])
+        self.assertEqual(self.request('/health')[1]['exerciseCounts'], [29, 30])
     def test_authentication_and_origin(self):
         self.assertEqual(self.request('/v1/sessions', key='wrong')[0], 401)
         self.assertEqual(self.request('/v1/sessions', origin='https://evil.example')[0], 403)

@@ -24,14 +24,36 @@ describe('personal workout storage', () => {
     expect(restored.state.active?.exercises.filter((_, i) => i !== index)).toEqual(legacy.exercises.filter((_, i) => i !== index))
     expect(loadState()).toEqual(restored)
   })
-  it('contains the complete 30-exercise program, with distinct timed and weighted sets', () => {
+  it('removes calf raises from active sessions while preserving legacy history and later exercises', () => {
+    expect(workout.exercises.some(e => e.id === 'calf-raise')).toBe(false)
+    const legacy = createSession([])
+    legacy.exercises.splice(22, 0, { exerciseId: 'calf-raise', sets: [{ reps: 19, completed: true }, { reps: 17, completed: true }] })
+    legacy.exercises[23].sets[0] = { reps: 14, completed: true }
+    legacy.exercises[25].sets[0] = { reps: 45, completed: true }
+    const history = [{ ...legacy, id: 'old-with-calves', finishedAt: new Date().toISOString() }]
+    expect(isSession(legacy)).toBe(true)
+    expect(stats(history[0])).toEqual({ exercises: 3, sets: 3, totalSets: 22 })
+    saveState({ ...emptyState(), active: legacy, history })
+    const restored = loadState()
+    expect(restored.error).toBeNull()
+    expect(restored.state.history).toEqual(history)
+    expect(restored.state.active?.exercises).toEqual(legacy.exercises.filter(e => e.exerciseId !== 'calf-raise'))
+    expect(isSession(restored.state.active)).toBe(true)
+    expect(createSession(history).exercises[22].sets[0].reps).toBe(14)
+    expect(createSession(history).exercises[24].sets[0].reps).toBe(45)
+    expect(loadState()).toEqual(restored)
+    const malformed = structuredClone(legacy)
+    malformed.exercises[22].exerciseId = 'unknown'
+    expect(isSession(malformed)).toBe(false)
+  })
+  it('contains the complete 29-exercise program, with distinct timed and weighted sets', () => {
     const s = createSession([])
-    expect(s.exercises).toHaveLength(30)
+    expect(s.exercises).toHaveLength(29)
     expect(s.exercises[13].sets.map(s => s.reps)).toEqual([15, 24])
     expect(s.exercises[15].sets[0].weight).toBe(8)
     expect(s.exercises[0].sets[0].weight).toBeUndefined()
     expect(workout.exercises[9].unit).toBe('seconds')
-    expect(stats(s)).toEqual({ exercises: 0, sets: 0, totalSets: 22 })
+    expect(stats(s)).toEqual({ exercises: 0, sets: 0, totalSets: 20 })
   })
   it('toggles the entire mobility block without changing other exercises or losing legacy values', () => {
     const original = createSession([])
@@ -40,7 +62,7 @@ describe('personal workout storage', () => {
     expect(blockCompleted(original, categories[0])).toBe(false)
     const checked = setBlockCompleted(original, categories[0], true)
     expect(blockCompleted(checked, categories[0])).toBe(true)
-    expect(stats(checked)).toEqual({ exercises: 10, sets: 1, totalSets: 22 })
+    expect(stats(checked)).toEqual({ exercises: 10, sets: 1, totalSets: 20 })
     expect(checked.exercises[0].sets[0].reps).toBe(9)
     expect(checked.exercises[15]).toEqual(original.exercises[15])
     const unchecked = setBlockCompleted(checked, categories[0], false)
@@ -54,14 +76,14 @@ describe('personal workout storage', () => {
   })
   it('tracks stretching separately from mobility and preserves saved seconds', () => {
     const original = createSession([])
-    original.exercises[25].sets[0] = { reps: 45, completed: true }
+    original.exercises[24].sets[0] = { reps: 45, completed: true }
     expect(blockCompleted(original, categories[4])).toBe(false)
     const checked = setBlockCompleted(original, categories[4], true)
     expect(blockCompleted(checked, categories[4])).toBe(true)
     expect(blockCompleted(checked, categories[0])).toBe(false)
-    expect(stats(checked)).toEqual({ exercises: 5, sets: 0, totalSets: 22 })
-    expect(checked.exercises[25].sets[0].reps).toBe(45)
-    expect(checked.exercises.slice(0, 25)).toEqual(original.exercises.slice(0, 25))
+    expect(stats(checked)).toEqual({ exercises: 5, sets: 0, totalSets: 20 })
+    expect(checked.exercises[24].sets[0].reps).toBe(45)
+    expect(checked.exercises.slice(0, 24)).toEqual(original.exercises.slice(0, 24))
     const state = { ...emptyState(), active: checked, history: [original] }
     expect(saveState(state)).toBe(true)
     expect(loadState().state).toEqual(state)

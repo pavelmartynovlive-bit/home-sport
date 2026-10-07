@@ -34,8 +34,8 @@ def validate_session(s, draft=False):
     if not draft and timestamp(s.get('finishedAt')) < started:
         raise ValueError('Invalid duration')
     exercises = s.get('exercises')
-    if not isinstance(exercises, list) or len(exercises) != 30:
-        raise ValueError('Expected 30 exercises')
+    if not isinstance(exercises, list) or len(exercises) not in (29, 30):
+        raise ValueError('Expected 29 or 30 exercises')
     ids = set()
     for e in exercises:
         if not isinstance(e, dict) or not isinstance(e.get('exerciseId'), str) or not ID.fullmatch(e['exerciseId']) or e['exerciseId'] in ids:
@@ -122,7 +122,7 @@ def make_server(host, port, database, token, origin):
                 try:
                     with connection(database) as db:
                         db.execute('SELECT 1 FROM sessions LIMIT 1').fetchone()
-                    self.reply(200, {'ok': True, 'draft': True})
+                    self.reply(200, {'ok': True, 'draft': True, 'exerciseCounts': [29, 30]})
                 except sqlite3.Error:
                     self.reply(503, {'error': 'Database unavailable'})
                 return
