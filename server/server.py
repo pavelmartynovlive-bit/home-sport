@@ -7,6 +7,7 @@ import math
 import os
 import re
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -24,10 +25,13 @@ def timestamp(value):
         raise ValueError('Timezone required')
     return parsed
 
-def validate_session(s):
+def validate_session(s, draft=False):
     if not isinstance(s, dict) or not isinstance(s.get('id'), str) or not ID.fullmatch(s['id']) or s.get('workoutId') != 'home':
         raise ValueError('Invalid session')
-    if timestamp(s.get('finishedAt')) < timestamp(s.get('startedAt')):
+    started = timestamp(s.get('startedAt'))
+    if draft and 'finishedAt' in s:
+        raise ValueError('Expected unfinished session')
+    if not draft and timestamp(s.get('finishedAt')) < started:
         raise ValueError('Invalid duration')
     exercises = s.get('exercises')
     if not isinstance(exercises, list) or len(exercises) != 30:
@@ -48,12 +52,20 @@ def validate_session(s):
                 if type(n) not in (int, float) or not math.isfinite(n) or not 0 <= n <= 999:
                     raise ValueError('Invalid numeric value')
 
+@contextmanager
 def connection(path):
     db = sqlite3.connect(path, timeout=10)
-    db.execute('PRAGMA journal_mode=WAL')
-    db.execute('PRAGMA synchronous=FULL')
-    db.execute('CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, started_at TEXT NOT NULL, payload TEXT NOT NULL)')
-    return db
+    try:
+        db.execute('PRAGMA journal_mode=WAL')
+        db.execute('PRAGMA synchronous=FULL')
+        db.execute('CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, started_at TEXT NOT NULL, payload TEXT NOT NULL)')
+        db.execute('CREATE TABLE IF NOT EXISTS draft (slot INTEGER PRIMARY KEY CHECK(slot = 1), revision INTEGER NOT NULL, payload TEXT)')
+        db.execute('INSERT OR IGNORE INTO draft VALUES (1, 0, NULL)')
+        db.commit()
+        with db:
+            yield db
+    finally:
+        db.close()
 
 def make_server(host, port, database, token, origin):
     if len(token) < 32:
@@ -110,11 +122,19 @@ def make_server(host, port, database, token, origin):
                 try:
                     with connection(database) as db:
                         db.execute('SELECT 1 FROM sessions LIMIT 1').fetchone()
-                    self.reply(200, {'ok': True})
+                    self.reply(200, {'ok': True, 'draft': True})
                 except sqlite3.Error:
                     self.reply(503, {'error': 'Database unavailable'})
                 return
             if not self.allowed():
+                return
+            if path == '/v1/draft':
+                try:
+                    with connection(database) as db:
+                        revision, payload = db.execute('SELECT revision, payload FROM draft WHERE slot = 1').fetchone()
+                    self.reply(200, {'version': 1, 'revision': revision, 'session': json.loads(payload) if payload else None})
+                except sqlite3.Error:
+                    self.reply(503, {'error': 'Database unavailable'})
                 return
             if path != '/v1/sessions':
                 self.reply(404, {'error': 'Not found'})
@@ -133,6 +153,9 @@ def make_server(host, port, database, token, origin):
             if not self.allowed():
                 return
             path = urlsplit(self.path).path
+            if path == '/v1/draft':
+                self.put_draft()
+                return
             match = re.fullmatch(r'/v1/sessions/([A-Za-z0-9_-]{1,80})', path)
             if not match:
                 self.reply(404, {'error': 'Not found'})
@@ -163,8 +186,53 @@ def make_server(host, port, database, token, origin):
                         self.reply(507, {'error': 'Backup capacity reached'})
                         return
                     db.execute('INSERT INTO sessions VALUES (?, ?, ?)', (s['id'], s['startedAt'], payload))
+                    self.clear_finished_draft(db, s['id'])
                 # Acknowledge only after the transaction was committed.
                 self.reply(201, {'id': s['id'], 'saved': True})
+            except sqlite3.Error:
+                self.reply(503, {'error': 'Database unavailable'})
+        def clear_finished_draft(self, db, session_id):
+            draft_payload = db.execute('SELECT payload FROM draft WHERE slot = 1').fetchone()[0]
+            if draft_payload and json.loads(draft_payload)['id'] == session_id:
+                db.execute('UPDATE draft SET revision = revision + 1, payload = NULL WHERE slot = 1')
+        def put_draft(self):
+            try:
+                if self.headers.get('Transfer-Encoding'):
+                    raise ValueError('Unsupported transfer encoding')
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 0 < length <= MAX_BODY:
+                    self.reply(413, {'error': 'Invalid body size'})
+                    return
+                data = json.loads(self.rfile.read(length))
+                if not isinstance(data, dict) or data.get('version') != 1 or type(data.get('revision')) is not int or not 0 <= data['revision'] <= 9007199254740991:
+                    raise ValueError('Invalid revision')
+                session = data.get('session')
+                if session is None:
+                    raise ValueError('Expected unfinished session')
+                validate_session(session, draft=True)
+                payload = json.dumps(session, sort_keys=True, ensure_ascii=False, separators=(',', ':'), allow_nan=False)
+            except (ValueError, TypeError, OverflowError, OSError):
+                self.reply(400, {'error': 'Invalid draft'})
+                return
+            try:
+                with connection(database) as db:
+                    db.execute('BEGIN IMMEDIATE')
+                    revision, existing = db.execute('SELECT revision, payload FROM draft WHERE slot = 1').fetchone()
+                    if db.execute('SELECT 1 FROM sessions WHERE id = ?', (session['id'],)).fetchone():
+                        self.reply(409, {'error': 'Session already finished'})
+                        return
+                    if existing == payload:
+                        # A retry after a lost response confirms the existing committed version.
+                        self.reply(200, {'version': 1, 'revision': revision, 'session': session})
+                        return
+                    if data['revision'] != revision:
+                        self.reply(409, {'error': 'Draft changed'})
+                        return
+                    if existing and json.loads(existing)['id'] != session['id']:
+                        self.reply(409, {'error': 'Another active session exists'})
+                        return
+                    db.execute('UPDATE draft SET revision = revision + 1, payload = ? WHERE slot = 1', (payload,))
+                self.reply(200, {'version': 1, 'revision': revision + 1, 'session': session})
             except sqlite3.Error:
                 self.reply(503, {'error': 'Database unavailable'})
     return ThreadingHTTPServer((host, port), Handler)

@@ -1,6 +1,7 @@
 import { isSession } from './store'
 import type { WorkoutSession } from './types'
-export interface BackupConfig { url: string; key: string; savedIds: string[] }
+export interface DraftBackup { version: 1; revision: number; session: WorkoutSession | null }
+export interface BackupConfig { url: string; key: string; savedIds: string[]; draft?: DraftBackup; draftInFlight?: DraftBackup }
 export const BACKUP_KEY = 'home-sport:backup:v1'
 export function normalizeBackupUrl(value: string): string {
   let url: URL
@@ -13,7 +14,7 @@ export function readBackupConfig(): BackupConfig | null {
   try {
     const c = JSON.parse(localStorage.getItem(BACKUP_KEY) || 'null')
     if (!c || typeof c.url !== 'string' || typeof c.key !== 'string' || c.key.length < 32 || !Array.isArray(c.savedIds) || !c.savedIds.every((id: unknown) => typeof id === 'string')) return null
-    return { ...c, url: normalizeBackupUrl(c.url) }
+    return { url: normalizeBackupUrl(c.url), key: c.key, savedIds: c.savedIds, ...(isDraft(c.draft) ? { draft: c.draft } : {}), ...(isDraft(c.draftInFlight) ? { draftInFlight: c.draftInFlight } : {}) }
   } catch { return null }
 }
 export function saveBackupConfig(config: BackupConfig | null): void {
@@ -65,6 +66,35 @@ function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`
   if (value && typeof value === 'object') return `{${Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(',')}}`
   return JSON.stringify(value)
+}
+export function sameSession(a: WorkoutSession | null | undefined, b: WorkoutSession | null | undefined): boolean {
+  return canonical(a ?? null) === canonical(b ?? null)
+}
+export function canUpdateDraft(config: BackupConfig, remote: DraftBackup, active: WorkoutSession): boolean {
+  if (!remote.session) return true
+  if (remote.session.id !== active.id) return false
+  const base = config.draft
+  const sent = config.draftInFlight
+  return sameSession(base?.session, remote.session) ||
+    !!(base?.session?.id === active.id && remote.revision < base.revision) ||
+    !!(sent && remote.revision > sent.revision && sameSession(sent.session, remote.session))
+}
+function isDraft(data: unknown): data is DraftBackup {
+  if (!data || typeof data !== 'object') return false
+  const d = data as DraftBackup
+  return d.version === 1 && Number.isSafeInteger(d.revision) && d.revision >= 0 &&
+    (d.session === null || (isSession(d.session) && d.session.finishedAt === undefined))
+}
+export async function fetchDraft(config: BackupConfig, signal?: AbortSignal): Promise<DraftBackup> {
+  const data = await request(config, '/v1/draft', {}, signal)
+  if (!isDraft(data)) throw new BackupError('Формат текущей тренировки на сервере не подходит. Данные телефона сохранены.')
+  return data
+}
+export async function uploadDraft(config: BackupConfig, session: WorkoutSession, revision: number, signal?: AbortSignal): Promise<DraftBackup> {
+  if (!isSession(session) || session.finishedAt !== undefined) throw new BackupError('В текущую копию можно отправить только незавершённую тренировку.')
+  const data = await request(config, '/v1/draft', { method: 'PUT', body: JSON.stringify({ version: 1, revision, session }) }, signal)
+  if (!isDraft(data) || !sameSession(data.session, session)) throw new BackupError('Сервер не подтвердил сохранение текущей тренировки.')
+  return data
 }
 export function confirmedSessionIds(local: WorkoutSession[], remote: WorkoutSession[]): string[] {
   const server = new Map(remote.map(s => [s.id, canonical(s)]))

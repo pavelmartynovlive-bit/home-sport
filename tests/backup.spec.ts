@@ -7,7 +7,7 @@ const testKey = 'test-only-backup-key-not-a-production-secret'
 const endpoint = 'http://127.0.0.1:8788'
 let server: ReturnType<typeof spawn>
 let directory: string
-test.beforeAll(async () => {
+test.beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'home-sport-api-test-'))
   server = spawn('python3', ['server/server.py'], { env: { ...process.env, BACKUP_TOKEN: testKey, DATABASE_PATH: join(directory, 'sessions.sqlite3'), PORT: '8788', ALLOWED_ORIGIN: 'http://localhost:4173' }, stdio: 'ignore' })
   for (let attempt = 0; attempt < 50; attempt++) {
@@ -16,7 +16,7 @@ test.beforeAll(async () => {
   }
   throw new Error('Test backup API failed to start')
 })
-test.afterAll(async () => {
+test.afterEach(async () => {
   if (server && server.exitCode === null) {
     const done = new Promise(resolve => server.once('exit', resolve)); server.kill(); await done
   }
@@ -190,4 +190,156 @@ test('a phone that silently refuses to store connection does not report success'
   await expect(page.locator('.backup-message')).toContainText('Не удалось сохранить подключение на телефоне')
   await expect(page.getByLabel('Адрес сервера')).toBeVisible()
   expect(await page.evaluate(() => localStorage.getItem('home-sport:backup:v1'))).toBeNull()
+})
+
+async function connectBackup(page: import('@playwright/test').Page) {
+  await page.goto('./')
+  await page.getByRole('button', { name: 'Резервная копия', exact: false }).click()
+  await page.getByLabel('Адрес сервера').fill(endpoint)
+  await page.getByLabel('Личный ключ доступа').fill(testKey)
+  await page.getByRole('button', { name: 'Подключить сервер', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Отправить копию сейчас' })).toBeEnabled()
+}
+async function serverDraft(page: import('@playwright/test').Page) {
+  return (await page.request.get(`${endpoint}/v1/draft`, { headers: { Authorization: `Bearer ${testKey}` } })).json()
+}
+
+test('draft changes are debounced, confirmed, restored after local loss, and cleared on finish', async ({ page }) => {
+  await connectBackup(page)
+  await page.locator('.back-link').click()
+  await page.getByRole('button', { name: 'Начать тренировку' }).click()
+  await page.locator('.set-check').first().click()
+  const local = await page.evaluate(() => JSON.parse(localStorage.getItem('home-sport:v1')!).active)
+  // Nothing is uploaded synchronously with the edit.
+  expect((await serverDraft(page)).session).toBeNull()
+  await expect(page.locator('.draft-status')).toContainText('ожидают отправки')
+  await expect.poll(async () => (await serverDraft(page)).session, { timeout: 10000 }).toEqual(local)
+  await expect(page.locator('.draft-status')).toContainText('Текущая тренировка сохранена на сервере')
+  await page.locator('.set-check').first().click()
+  await page.locator('.set-check').first().click()
+  await page.locator('.set-check').first().click()
+  const changed = await page.evaluate(() => JSON.parse(localStorage.getItem('home-sport:v1')!).active)
+  await expect.poll(async () => (await serverDraft(page)).session, { timeout: 10000 }).toEqual(changed)
+  expect((await serverDraft(page)).revision).toBe(2)
+  await page.evaluate(() => localStorage.removeItem('home-sport:v1'))
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Продолжить тренировку' })).toBeVisible()
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('home-sport:v1')!).active)).toEqual(changed)
+  await page.getByRole('button', { name: 'Продолжить тренировку' }).click()
+  await page.getByRole('button', { name: 'Завершить тренировку', exact: true }).click()
+  await page.getByRole('button', { name: 'Завершить и сохранить' }).click()
+  await expect.poll(async () => (await serverDraft(page)).session).toBeNull()
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Начать тренировку' })).toBeVisible()
+  const state = await page.evaluate(() => JSON.parse(localStorage.getItem('home-sport:v1')!))
+  expect(state.active).toBeNull()
+  expect(state.history).toHaveLength(1)
+})
+
+test('offline draft edits survive reload and are sent when connectivity returns', async ({ page }) => {
+  await connectBackup(page)
+  await page.locator('.back-link').click()
+  await page.getByRole('button', { name: 'Начать тренировку' }).click()
+  await expect.poll(async () => (await serverDraft(page)).session, { timeout: 10000 }).not.toBeNull()
+  await page.route(`${endpoint}/v1/draft`, route => route.abort('connectionfailed'))
+  await page.locator('.set-check').first().click()
+  const local = await page.evaluate(() => JSON.parse(localStorage.getItem('home-sport:v1')!).active)
+  await expect(page.locator('.draft-status')).toContainText('Копию отправим', { timeout: 10000 })
+  await page.reload()
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('home-sport:v1')!).active)).toEqual(local)
+  await page.unroute(`${endpoint}/v1/draft`)
+  await page.evaluate(() => window.dispatchEvent(new Event('online')))
+  await expect.poll(async () => (await serverDraft(page)).session).toEqual(local)
+})
+
+test('a lost draft acknowledgement recovers without creating another revision', async ({ page }) => {
+  await connectBackup(page)
+  await page.route(`${endpoint}/v1/draft`, async route => {
+    if (route.request().method() !== 'PUT') { await route.continue(); return }
+    expect((await route.fetch()).ok()).toBe(true)
+    await route.abort('connectionfailed')
+  })
+  await page.locator('.back-link').click()
+  await page.getByRole('button', { name: 'Начать тренировку' }).click()
+  await page.locator('.set-check').first().click()
+  await expect(page.locator('.draft-status')).toContainText('Копию отправим', { timeout: 10000 })
+  const committed = await serverDraft(page)
+  expect(committed.revision).toBe(1)
+  await page.unroute(`${endpoint}/v1/draft`)
+  await page.reload()
+  await expect(page.locator('.draft-status')).toContainText('Текущая тренировка сохранена на сервере')
+  expect(await serverDraft(page)).toEqual(committed)
+})
+
+test('a different server draft is preserved alongside an active local workout', async ({ page }) => {
+  const finished = await draftSession(page, 'local-active-conflict')
+  const { finishedAt: _, ...local } = finished
+  const remote = { ...local, id: 'remote-active-conflict' }
+  await page.evaluate(local => localStorage.setItem('home-sport:v1', JSON.stringify({ version: 1, active: local, history: [] })), local)
+  expect((await page.request.put(`${endpoint}/v1/draft`, { headers: { Authorization: `Bearer ${testKey}` }, data: { version: 1, revision: 0, session: remote } })).ok()).toBe(true)
+  await connectBackup(page)
+  await expect(page.locator('.draft-status')).toContainText('На сервере другая текущая тренировка')
+  const state = await page.evaluate(() => JSON.parse(localStorage.getItem('home-sport:v1')!))
+  expect(state.active.id).toBe(local.id)
+  expect((await serverDraft(page)).session).toEqual(remote)
+})
+
+test('an older VPS keeps completed backups working and shows that draft support requires update', async ({ page }) => {
+  await page.route(`${endpoint}/v1/draft`, route => route.fulfill({ status: 404, json: { error: 'Not found' } }))
+  await connectBackup(page)
+  await expect(page.locator('.draft-status')).toContainText('нужно обновить сервер')
+  await page.locator('.back-link').click()
+  await page.getByRole('button', { name: 'Начать тренировку' }).click()
+  await page.getByRole('button', { name: 'Завершить тренировку', exact: true }).click()
+  await page.getByRole('button', { name: 'Завершить и сохранить' }).click()
+  await expect(page.locator('.home-backup-status')).toContainText('Копия на сервере сохранена')
+  const r = await page.request.get(`${endpoint}/v1/sessions`, { headers: { Authorization: `Bearer ${testKey}` } })
+  expect((await r.json()).sessions).toHaveLength(1)
+})
+
+test('more edits after a lost draft response are uploaded without a false conflict', async ({ page }) => {
+  await connectBackup(page)
+  let loseResponse = true
+  await page.route(`${endpoint}/v1/draft`, async route => {
+    if (route.request().method() !== 'PUT' || !loseResponse) { await route.continue(); return }
+    expect((await route.fetch()).ok()).toBe(true)
+    await route.abort('connectionfailed')
+  })
+  await page.locator('.back-link').click()
+  await page.getByRole('button', { name: 'Начать тренировку' }).click()
+  await page.locator('.set-check').first().click()
+  await expect(page.locator('.draft-status')).toContainText('Копию отправим', { timeout: 10000 })
+  expect((await serverDraft(page)).revision).toBe(1)
+  await page.locator('.set-check').first().click()
+  const changed = await page.evaluate(() => JSON.parse(localStorage.getItem('home-sport:v1')!).active)
+  loseResponse = false
+  await page.reload()
+  await expect(page.locator('.draft-status')).toContainText('Текущая тренировка сохранена на сервере')
+  expect((await serverDraft(page)).session).toEqual(changed)
+  expect((await serverDraft(page)).revision).toBe(2)
+})
+
+test('finishing while a draft upload is in flight still uploads history and prevents resurrection', async ({ page }) => {
+  await connectBackup(page)
+  let release!: () => void
+  let started!: () => void
+  const requestStarted = new Promise<void>(resolve => { started = resolve })
+  const gate = new Promise<void>(resolve => { release = resolve })
+  await page.route(`${endpoint}/v1/draft`, async route => {
+    if (route.request().method() !== 'PUT') { await route.continue(); return }
+    started(); await gate; await route.continue()
+  })
+  await page.locator('.back-link').click()
+  await page.getByRole('button', { name: 'Начать тренировку' }).click()
+  await page.locator('.set-check').first().click()
+  await requestStarted
+  await page.getByRole('button', { name: 'Завершить тренировку', exact: true }).click()
+  await page.getByRole('button', { name: 'Завершить и сохранить' }).click()
+  release()
+  await expect(page.locator('.home-backup-status')).toContainText('Копия на сервере сохранена')
+  await expect.poll(async () => (await serverDraft(page)).session).toBeNull()
+  const response = await page.request.get(`${endpoint}/v1/sessions`, { headers: { Authorization: `Bearer ${testKey}` } })
+  expect((await response.json()).sessions).toHaveLength(1)
+  await page.reload()
+  await expect(page.getByRole('button', { name: 'Начать тренировку' })).toBeVisible()
 })

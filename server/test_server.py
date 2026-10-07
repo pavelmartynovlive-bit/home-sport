@@ -62,6 +62,56 @@ class BackupTests(unittest.TestCase):
         self.assertEqual(self.request('/v1/sessions/session-test', 'OPTIONS', origin='https://pavelmartynovlive-bit.github.io')[0], 204)
         self.assertEqual(self.request('/v1/sessions/session-test', 'OPTIONS', origin='https://evil.example')[0], 403)
         self.assertEqual(self.request('/v1/sessions/session-test', 'DELETE')[0], 405)
+    def test_draft_updates_retries_and_stale_writes(self):
+        draft = copy.deepcopy(self.session); del draft['finishedAt']
+        self.assertEqual(self.request('/v1/draft')[1], {'version': 1, 'revision': 0, 'session': None})
+        self.assertEqual(self.request('/v1/draft', key='wrong')[0], 401)
+        data = {'version': 1, 'revision': 0, 'session': draft}
+        self.assertEqual(self.request('/v1/draft', 'PUT', data)[1]['revision'], 1)
+        self.assertEqual(self.request('/v1/draft', 'PUT', data)[1]['revision'], 1)
+        changed = copy.deepcopy(draft); changed['exercises'][0]['sets'][0]['reps'] = 20
+        self.assertEqual(self.request('/v1/draft', 'PUT', {**data, 'session': changed})[0], 409)
+        self.assertEqual(self.request('/v1/draft', 'PUT', {**data, 'revision': 1, 'session': changed})[1]['revision'], 2)
+        self.assertEqual(self.request('/v1/draft', 'PUT', data)[0], 409)
+        other = {**changed, 'id': 'other-active'}
+        self.assertEqual(self.request('/v1/draft', 'PUT', {**data, 'revision': 2, 'session': other})[0], 409)
+        self.assertEqual(self.request('/v1/draft')[1]['session'], changed)
+    def test_finish_clears_draft_atomically_and_late_requests_cannot_resurrect_it(self):
+        draft = copy.deepcopy(self.session); del draft['finishedAt']
+        data = {'version': 1, 'revision': 0, 'session': draft}
+        self.request('/v1/draft', 'PUT', data)
+        self.assertEqual(self.request('/v1/sessions/session-test', 'PUT', self.session)[0], 201)
+        remote = self.request('/v1/draft')[1]
+        self.assertEqual(remote, {'version': 1, 'revision': 2, 'session': None})
+        self.assertEqual(self.request('/v1/draft', 'PUT', data)[0], 409)
+        self.assertEqual(self.request('/v1/draft', 'PUT', {**data, 'revision': 2})[0], 409)
+        self.assertEqual(self.request('/v1/draft')[1], remote)
+        self.assertEqual(self.request('/v1/sessions')[1]['sessions'], [self.session])
+    def test_draft_validation_and_snapshot_survival(self):
+        draft = copy.deepcopy(self.session); del draft['finishedAt']
+        for data in [{'version': 1, 'revision': True, 'session': draft}, {'version': 1, 'revision': 0, 'session': self.session}, {'version': 1, 'revision': 0, 'session': None}]:
+            self.assertEqual(self.request('/v1/draft', 'PUT', data)[0], 400)
+        self.request('/v1/draft', 'PUT', {'version': 1, 'revision': 0, 'session': draft})
+        snapshot = str(Path(self.temp.name) / 'draft-snapshot.sqlite3')
+        subprocess.run(['python3', 'server/backup.py', self.db, snapshot], check=True, capture_output=True)
+        with sqlite3.connect(snapshot) as db:
+            revision, payload = db.execute('SELECT revision, payload FROM draft WHERE slot = 1').fetchone()
+            self.assertEqual(revision, 1); self.assertEqual(json.loads(payload), draft)
+        self.http.shutdown(); self.http.server_close(); self.thread.join()
+        self.http = make_server('127.0.0.1', 0, snapshot, self.token, 'https://pavelmartynovlive-bit.github.io')
+        self.thread = threading.Thread(target=self.http.serve_forever, daemon=True); self.thread.start()
+        self.url = f'http://127.0.0.1:{self.http.server_port}'
+        self.assertEqual(self.request('/v1/draft')[1]['session'], draft)
+    def test_additive_migration_keeps_legacy_history(self):
+        legacy = str(Path(self.temp.name) / 'legacy.sqlite3')
+        with sqlite3.connect(legacy) as db:
+            db.execute('CREATE TABLE sessions (id TEXT PRIMARY KEY, started_at TEXT NOT NULL, payload TEXT NOT NULL)')
+            db.execute('INSERT INTO sessions VALUES (?, ?, ?)', (self.session['id'], self.session['startedAt'], json.dumps(self.session)))
+        upgraded = make_server('127.0.0.1', 0, legacy, self.token, 'https://pavelmartynovlive-bit.github.io')
+        upgraded.server_close()
+        with sqlite3.connect(legacy) as db:
+            self.assertEqual(json.loads(db.execute('SELECT payload FROM sessions').fetchone()[0]), self.session)
+            self.assertEqual(db.execute('SELECT revision, payload FROM draft').fetchone(), (0, None))
     def test_committed_database_survives_restart_and_backup_restores(self):
         self.request('/v1/sessions/session-test', 'PUT', self.session)
         snapshot = str(Path(self.temp.name) / 'snapshot.sqlite3')

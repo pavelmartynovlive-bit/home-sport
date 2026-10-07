@@ -25,7 +25,8 @@ export default function BackupPanel({ backup }: { backup: Backup }) {
   return <section className="backup-panel">
     <h2>Резервная копия</h2>
     <p className="backup-status" role="status">Сохранено на телефоне. {backup.status}{backup.pending > 0 && ` · ожидают отправки: ${backup.pending}`}</p>
-    <p className="backup-explanation">При открытии проверяем копию на сервере: возвращаем недостающую историю и отправляем завершённые тренировки. Без интернета повторим позже. Незавершённая тренировка остаётся на телефоне.</p>
+    <p className="draft-status" role="status">{backup.draftStatus}</p>
+    <p className="backup-explanation">При открытии возвращаем недостающую историю и текущую тренировку с сервера. Изменения текущей тренировки копируются через 3 секунды после последнего изменения. Без интернета продолжаешь заниматься — отправим копию при возвращении связи.</p>
     {backup.config && <>
       <p className="backup-address">{backup.config.url}</p>
       <button className="button secondary" disabled={disabled} onClick={() => void backup.sync()}>Отправить копию сейчас</button>

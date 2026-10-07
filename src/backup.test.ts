@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { confirmedSessionIds, fetchBackup, mergeHistory, normalizeBackupUrl, pendingSessions, uploadSession } from './backup'
+import { canUpdateDraft, confirmedSessionIds, fetchBackup, fetchDraft, mergeHistory, normalizeBackupUrl, pendingSessions, uploadDraft, uploadSession } from './backup'
 import { createSession } from './store'
 const config = { url: 'https://backup.example.com', key: 'test-only-access-key-not-a-real-secret', savedIds: [] }
 function completed(id = 'session-test') {
@@ -7,6 +7,28 @@ function completed(id = 'session-test') {
 }
 afterEach(() => vi.unstubAllGlobals())
 describe('backup transport and restoration', () => {
+  it('drafts require unfinished sessions and matching server acknowledgements', async () => {
+    const active = createSession([])
+    const request = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ version: 1, revision: 1, session: active }) })
+    vi.stubGlobal('fetch', request)
+    expect((await uploadDraft(config, active, 0)).revision).toBe(1)
+    await expect(uploadDraft(config, completed(), 0)).rejects.toThrow('незавершённую')
+    request.mockResolvedValue({ ok: true, json: async () => ({ version: 1, revision: 1, session: completed() }) })
+    await expect(fetchDraft(config)).rejects.toThrow('Формат')
+    request.mockResolvedValue({ ok: true, json: async () => ({ version: 1, revision: 1, session: null }) })
+    await expect(uploadDraft(config, active, 0)).rejects.toThrow('не подтвердил')
+  })
+  it('draft updates handle lost responses and old snapshots while protecting unfamiliar server changes', () => {
+    const active = createSession([])
+    const changed = { ...active, exercises: active.exercises.map((e, i) => i ? e : { ...e, sets: e.sets.map(s => ({ ...s, completed: true })) }) }
+    const base = { version: 1 as const, revision: 2, session: active }
+    expect(canUpdateDraft({ ...config, draft: base }, base, changed)).toBe(true)
+    expect(canUpdateDraft(config, base, changed)).toBe(false)
+    expect(canUpdateDraft({ ...config, draftInFlight: { ...base, revision: 1 } }, base, changed)).toBe(true)
+    expect(canUpdateDraft({ ...config, draft: { ...base, revision: 4, session: changed } }, base, changed)).toBe(true)
+    expect(canUpdateDraft({ ...config, draft: base }, { ...base, session: { ...active, id: 'another-device' } }, changed)).toBe(false)
+    expect(canUpdateDraft(config, { ...base, session: null }, changed)).toBe(true)
+  })
   it('requires HTTPS and disallows credentials, fragments, and query strings', () => {
     expect(normalizeBackupUrl('https://backup.example.com/')).toBe('https://backup.example.com')
     expect(normalizeBackupUrl('http://127.0.0.1:8787')).toBe('http://127.0.0.1:8787')

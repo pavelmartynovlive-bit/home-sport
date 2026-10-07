@@ -135,10 +135,12 @@ export default function App() {
 
         <button className="backup-link" onClick={() => go('backup')}>Резервная копия<span>{backup.config ? backup.pending ? 'Ожидает отправки' : 'Подключена' : 'Настроить'}</span></button>
         {backup.config && <p className="home-backup-status" role="status">Сохранено на телефоне · {backup.status}</p>}
+        {backup.config && active && <p className="draft-status" role="status">{backup.draftStatus}</p>}
         <p className="home-footer">Без сравнения. Без рекордов. Для себя.</p>
       </>}
       {screen === 'workout' && active && progress && <>
         <button className="back-link" onClick={() => go('home')}><Icon name="back"/>На главную · сессия сохранена</button>
+        {backup.config && <p className="draft-status" role="status">{backup.draftStatus}</p>}
         <div className="page-heading"><span className="eyebrow">ТВОЯ ТРЕНИРОВКА</span><h1>Движение за<br/>движением.</h1></div>
         <div className="workout-progress"><div><strong>{progress.exercises} / {total} упражнений</strong><span><Icon name="clock" size={16}/>{clock}</span></div><progress value={progress.exercises} max={total} aria-label="Прогресс тренировки"/><small>{progress.sets} из {progress.totalSets} подходов выполнено</small></div>
         {categories.map((category, categoryIndex) => <section className="exercise-block" id={`block-${categoryIndex}`} key={category}><div className="block-heading"><span className="block-number">0{categoryIndex + 1}</span><h2>{category}</h2></div>{(categoryIndex === 0 || categoryIndex === 4) ? <div className={`mobility-card ${blockCompleted(active, category) ? 'completed' : ''}`}>
@@ -152,6 +154,7 @@ export default function App() {
         <div className="sticky-actions"><button className="button primary" onClick={() => go('summary')}>{progress.exercises === total ? 'К завершению' : 'Завершить тренировку'}<Icon name="arrow"/></button></div>
       </>}
       {screen === 'focus' && active && <>
+        {backup.config && <p className="draft-status" role="status">{backup.draftStatus}</p>}
         <button className="back-link" onClick={() => go('workout')}><Icon name="back"/>Все упражнения</button><div className="focus-progress"><span>Упражнение <strong>{focus + 1} / {total}</strong></span><span>{clock}</span><progress value={focus + 1} max={total} aria-label="Текущее упражнение"/></div>
         <div className="focus-title"><span className="eyebrow">{current.category.toLocaleUpperCase('ru-RU')}</span><h1>{current.title}</h1><p>План: {current.plan}</p>{current.weightNote && <small>{current.weightNote}</small>}</div>
         <div className="previous"><Icon name="history"/><div><span>Прошлый раз</span><p>{previous ? previous.sets.map((s, j) => `${s.weight !== undefined ? `${s.weight} кг × ` : ''}${s.reps} ${unit(current)}${s.completed ? '' : ' (пропущен)'}`).join(' · ') : 'Первый раз — начни со значений программы'}</p></div></div>
